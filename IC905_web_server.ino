@@ -1,11 +1,19 @@
 // Load Wi-Fi library
 #include <WiFi.h>
+#include <WiFiMulti.h>
 
+WiFiMulti wifiMulti;
 // Replace with your network credentials
-const char* ssid = "kb2rww";  //Replace with your network ID
+//const char* ssid = "kb2rww";  //Replace with your network ID
 //const char* ssid = "KB2RWW Silverado";  //Replace with your network ID
 //const char* ssid = "kb2rwwp";  //Replace with your network ID
 const char* password = "1244600000";  // Replace with your network password
+
+
+/* Put IP Address details */
+IPAddress local_ip(192,168,0,123);
+IPAddress gateway(192,168,0,1);
+IPAddress subnet(255,255,255,0);
 
 // Set web server port number to 80
 WiFiServer server(80);
@@ -46,6 +54,7 @@ const long timeoutTime = 2000;
 
 void setup() {
   Serial.begin(115200);
+
   // Initialize the output variables as outputs
   pinMode(output0, OUTPUT);
   pinMode(output2, OUTPUT);
@@ -71,10 +80,20 @@ void setup() {
   digitalWrite(output22, LOW);
   
   // Connect to Wi-Fi network with SSID and password
-  Serial.print("Connecting to Network:");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
+  //Serial.print("Connecting to Network:");
+  //Serial.println(ssid);
+  //WiFi.begin(ssid, password);
+  wifiMulti.addAP("kb2rww", password);
+  wifiMulti.addAP("kb2rwwp", password);
+  wifiMulti.addAP("KB2RWW Silverado", password);
+
+  //while (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Connecting Wifi...");
+  if (wifiMulti.run() == WL_CONNECTED) {
+    Serial.println("");
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
     delay(500);
     Serial.print(".");
   }
