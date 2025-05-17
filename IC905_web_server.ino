@@ -222,105 +222,139 @@ void loop(){
             }
 
             // Display the HTML web page
-            client.println("<!DOCTYPE html><html>");
-            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-            client.println("<link rel=\"icon\" href=\"data:,\">");
-            // CSS to style the on/off buttons 
-            // Feel free to change the background-color and font-size attributes to fit your preferences
-            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
-            //client.println(".button { background-color: #4CAF50; border: none; color: white; padding: 16px 40px;");
-            client.println(".button { background-color: #555555; border: none; color: white; padding: 16px 40px;");
-            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
-            //client.println(".button2 {background-color: #555555;}</style></head>");
-            client.println(".button2 {background-color: #4CAF50;}</style></head>");
+              client.println("<!DOCTYPE html><html>");
+client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+"<link rel=\"icon\" href=\"data:,\">"
+"<style>"
+"body{background:linear-gradient(135deg,#232526 0%,#414345 100%);color:#fff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;min-height:100vh;}"
+".container{background:rgba(255,255,255,0.08);border-radius:16px;box-shadow:0 6px 32px rgba(0,0,0,0.2);max-width:500px;margin:40px auto;padding:32px 24px;text-align:center;}"
+"h1{margin-bottom:8px;font-size:2.2em;font-weight:700;letter-spacing:2px;}"
+".status{display:inline-block;margin-left:10px;padding:3px 12px;border-radius:12px;font-size:0.95em;font-weight:600;background:#333;color:#fafafa;}"
+".status.on{background:#4CAF50;color:#fff;}"
+".status.off{background:#f44336;color:#fff;}"
+".control-group{margin:22px 0 10px 0;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);}"
+".button{background-color:#555555;border:none;color:white;padding:16px 40px;text-decoration:none;font-size:1.15em;margin:6px 3px;cursor:pointer;border-radius:8px;transition:background 0.2s,transform 0.1s;box-shadow:0 2px 8px rgba(0,0,0,0.18);}"
+".button2{background-color:#4CAF50;}"
+".button:hover,.button2:hover{background-color:#222;transform:scale(1.04);}"
+"@media (max-width:600px){.container{padding:12px 4px;}.button,.button2{width:95%;font-size:1.05em;}}"
+"</style></head><body>");
+client.println("<div class=\"container\">");
+client.println("<h1>IC-905 Control</h1>");
+client.println("<p style=\"margin-bottom:28px; color:#bbb;\">ESP32 Web Server Interface</p>");
 
-            // Web Page Heading
-            client.println("<body><h1>IC-905 control</h1>");
-            client.println("<body><h1>ESP32 Web Server</h1>");
-            
-            // Display current state, and ON/OFF buttons for GPIO 0  
-            client.println("<p>Motor forword - Currently " + output0State + "</p>");
-            // If the output0State is off, it displays the ON button       
-            if (output0State=="off") {
-              client.println("<p><a href=\"/0/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/0/off\"><button class=\"button button2\">OFF</button></a></p>");
-            } 
-               
-            // Display current state, and ON/OFF buttons for GPIO 4  
-            client.println("<p>Motor revers - Currently" + output4State + "</p>");
-            // If the output4State is off, it displays the ON button       
-            if (output4State=="off") {
-              client.println("<p><a href=\"/4/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/4/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
+/* Example for each control group: repeat for each GPIO */
+client.println("<div class=\"control-group\">");
+client.print("<span>Motor forward</span>");
+client.print("<span class=\"status ");
+client.print(output0State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output0State);
+client.println("</span>");
+client.println("<a href=\"/0/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/0/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
 
-            // Display current state, and ON/OFF buttons for GPIO 32  
-            client.println("<p>144 to 1296 triband  - Currently" + output32State + "</p>");
-            // If the output32State is off, it displays the ON button       
-            if (output32State=="off") {
-              client.println("<p><a href=\"/32/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/32/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
+client.println("<div class=\"control-group\">");
+client.print("<span>Motor reverse</span>");
+client.print("<span class=\"status ");
+client.print(output4State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output4State);
+client.println("</span>");
+client.println("<a href=\"/4/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/4/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
 
-            // Display current state, and ON/OFF buttons for GPIO 25  
-            client.println("<p>2304Ghz - Currently" + output25State + "</p>");
-            // If the output25State is off, it displays the ON button       
-            if (output25State=="off") {
-              client.println("<p><a href=\"/25/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/25/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-            // Display current state, and ON/OFF buttons for GPIO 27  
-            client.println("<p>Omnie enable - Currently" + output27State + "</p>");
-            // If the output27State is off, it displays the ON button       
-            if (output27State=="off") {
-              client.println("<p><a href=\"/27/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/27/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-            // Display current state, and ON/OFF buttons for GPIO 16  
-            client.println("<p>5760Ghz - Currently" + output16State + "</p>");
-            // If the output16State is off, it displays the ON button       
-            if (output16State=="off") {
-              client.println("<p><a href=\"/16/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/16/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-            // Display current state, and ON/OFF buttons for GPIO 17  
-            client.println("<p>triband dish - Currently" + output17State + "</p>");
-            // If the output17State is off, it displays the ON button       
-            if (output17State=="off") {
-              client.println("<p><a href=\"/17/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/17/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-            // Display current state, and ON/OFF buttons for GPIO 21  
-            client.println("<p>IO21 - Currently" + output21State + "</p>");
-            // If the output21State is off, it displays the ON button       
-            if (output21State=="off") {
-              client.println("<p><a href=\"/21/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/21/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-            // Display current state, and ON/OFF buttons for GPIO 22  
-            client.println("<p>IO22 - Currently" + output22State + "</p>");
-            // If the output22State is off, it displays the ON button       
-            if (output22State=="off") {
-              client.println("<p><a href=\"/22/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/22/off\"><button class=\"button button2\">OFF</button></a></p>");
-            }
-            // Display current state, and ON/OFF buttons for GPIO 2  
-            client.println("<p>LED - Currently" + output2State + "</p>");
-            // If the output2State is off, it displays the ON button       
-            if (output2State=="off") {
-              client.println("<p><a href=\"/2/on\"><button class=\"button\">ON</button></a></p>");
-            } else {
-              client.println("<p><a href=\"/2/off\"><button class=\"button button2\">OFF</button></a></p>");
-            client.println("</body></html>");
+/* Repeat for each group: 32, 25, 27, 16, 17, 21, 22, 2 */
+client.println("<div class=\"control-group\">");
+client.print("<span>144 to 1296 triband</span>");
+client.print("<span class=\"status ");
+client.print(output32State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output32State);
+client.println("</span>");
+client.println("<a href=\"/32/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/32/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
+
+client.println("<div class=\"control-group\">");
+client.print("<span>2304Ghz</span>");
+client.print("<span class=\"status ");
+client.print(output25State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output25State);
+client.println("</span>");
+client.println("<a href=\"/25/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/25/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
+
+client.println("<div class=\"control-group\">");
+client.print("<span>Omnie enable</span>");
+client.print("<span class=\"status ");
+client.print(output27State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output27State);
+client.println("</span>");
+client.println("<a href=\"/27/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/27/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
+
+client.println("<div class=\"control-group\">");
+client.print("<span>5760Ghz</span>");
+client.print("<span class=\"status ");
+client.print(output16State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output16State);
+client.println("</span>");
+client.println("<a href=\"/16/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/16/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
+
+client.println("<div class=\"control-group\">");
+client.print("<span>triband dish</span>");
+client.print("<span class=\"status ");
+client.print(output17State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output17State);
+client.println("</span>");
+client.println("<a href=\"/17/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/17/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
+
+client.println("<div class=\"control-group\">");
+client.print("<span>IO21</span>");
+client.print("<span class=\"status ");
+client.print(output21State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output21State);
+client.println("</span>");
+client.println("<a href=\"/21/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/21/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
+
+client.println("<div class=\"control-group\">");
+client.print("<span>IO22</span>");
+client.print("<span class=\"status ");
+client.print(output22State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output22State);
+client.println("</span>");
+client.println("<a href=\"/22/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/22/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
+
+client.println("<div class=\"control-group\">");
+client.print("<span>LED</span>");
+client.print("<span class=\"status ");
+client.print(output2State == "on" ? "on" : "off");
+client.print("\">");
+client.print(output2State);
+client.println("</span>");
+client.println("<a href=\"/2/on\"><button class=\"button\">ON</button></a>");
+client.println("<a href=\"/2/off\"><button class=\"button button2\">OFF</button></a>");
+client.println("</div>");
+
+client.println("</div></body></html>");
             
             // The HTTP response ends with another blank line
             client.println();
