@@ -9,7 +9,6 @@ WiFiMulti wifiMulti;
 //const char* ssid = "kb2rwwp";  //Replace with your network ID
 const char* password = "1244600000";  // Replace with your network password
 
-
 /* Put IP Address details */
 IPAddress local_ip(192,168,0,123);
 IPAddress gateway(192,168,0,1);
@@ -80,15 +79,11 @@ void setup() {
   digitalWrite(output22, LOW);
   
   // Connect to Wi-Fi network with SSID and password
-  //Serial.print("Connecting to Network:");
-  //Serial.println(ssid);
-  //WiFi.begin(ssid, password);
   wifiMulti.addAP("kb2rww", password);
   wifiMulti.addAP("kb2rwwp", password);
   wifiMulti.addAP("KB2RWW Silverado", password);
 
-  //while (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Connecting Wifi...");
+  Serial.println("Connecting Wifi...");
   if (wifiMulti.run() == WL_CONNECTED) {
     Serial.println("");
     Serial.println("WiFi connected");
@@ -222,149 +217,158 @@ void loop(){
             }
 
             // Display the HTML web page
-              client.println("<!DOCTYPE html><html>");
-client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-"<link rel=\"icon\" href=\"data:,\">"
-"<style>"
-"body{background:linear-gradient(135deg,#232526 0%,#414345 100%);color:#fff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;min-height:100vh;}"
-".container{background:rgba(255,255,255,0.08);border-radius:16px;box-shadow:0 6px 32px rgba(0,0,0,0.2);max-width:500px;margin:40px auto;padding:32px 24px;text-align:center;}"
-"h1{margin-bottom:8px;font-size:2.2em;font-weight:700;letter-spacing:2px;}"
-".status{display:inline-block;margin-left:10px;padding:3px 12px;border-radius:12px;font-size:0.95em;font-weight:600;background:#333;color:#fafafa;}"
-".status.on{background:#4CAF50;color:#fff;}"
-".status.off{background:#f44336;color:#fff;}"
-".control-group{margin:22px 0 10px 0;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);}"
-".button{background-color:#555555;border:none;color:white;padding:16px 40px;text-decoration:none;font-size:1.15em;margin:6px 3px;cursor:pointer;border-radius:8px;transition:background 0.2s,transform 0.1s;box-shadow:0 2px 8px rgba(0,0,0,0.18);}"
-".button2{background-color:#4CAF50;}"
-".button:hover,.button2:hover{background-color:#222;transform:scale(1.04);}"
-"@media (max-width:600px){.container{padding:12px 4px;}.button,.button2{width:95%;font-size:1.05em;}}"
-"</style></head><body>");
-client.println("<div class=\"container\">");
-client.println("<h1>IC-905 Control</h1>");
-client.println("<p style=\"margin-bottom:28px; color:#bbb;\">ESP32 Web Server Interface</p>");
+            client.println("<!DOCTYPE html><html>");
+            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+           "<link rel=\"icon\" href=\"data:,\">"
+            "<style>"
+            "body{background:linear-gradient(135deg,#232526 0%,#414345 100%);color:#fff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;min-height:100vh;}"
+            ".container{background:rgba(255,255,255,0.08);border-radius:16px;box-shadow:0 6px 32px rgba(0,0,0,0.2);max-width:500px;margin:40px auto;padding:32px 24px;text-align:center;}"
+            "h1{margin-bottom:8px;font-size:2.2em;font-weight:700;letter-spacing:2px;}"
+            ".status{display:inline-block;margin-left:10px;padding:3px 12px;border-radius:12px;font-size:0.95em;font-weight:600;background:#333;color:#fafafa;}"
+            ".status.on{background:#4CAF50;color:#fff;}"
+            ".status.off{background:#f44336;color:#fff;}"
+            ".control-group{margin:22px 0 10px 0;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);}"
+            ".button{background-color:#555555;border:none;color:white;padding:16px 40px;text-decoration:none;font-size:1.15em;margin:6px 3px;cursor:pointer;border-radius:8px;transition:background 0.2s,transform 0.1s;box-shadow:0 2px 8px rgba(0,0,0,0.18);}"
+            ".button2{background-color:#4CAF50;}"
+            ".button:hover,.button2:hover{background-color:#222;transform:scale(1.04);}"
+            "@media (max-width:600px){.container{padding:12px 4px;}.button,.button2{width:95%;font-size:1.05em;}}"
+            "</style></head><body>");
+            client.println("<div class=\"container\">");
+            client.println("<h1>IC-905 Control</h1>");
+            client.println("<p style=\"margin-bottom:28px; color:#bbb;\">ESP32 Web Server Interface</p>");
 
-/* Example for each control group: repeat for each GPIO */
-client.println("<div class=\"control-group\">");
-client.print("<span>Motor forward</span>");
-client.print("<span class=\"status ");
-client.print(output0State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output0State);
-client.println("</span>");
-client.println("<a href=\"/0/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/0/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // Motor forward
+            client.println("<div class=\"control-group\">");
+            client.print("<span>Motor forward</span>");
+            client.print("<span class=\"status ");
+            client.print(output0State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output0State);
+            client.println("</span>");
+            client.println("<a href=\"/0/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/0/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("<div class=\"control-group\">");
-client.print("<span>Motor reverse</span>");
-client.print("<span class=\"status ");
-client.print(output4State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output4State);
-client.println("</span>");
-client.println("<a href=\"/4/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/4/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // Motor reverse
+            client.println("<div class=\"control-group\">");
+            client.print("<span>Motor reverse</span>");
+            client.print("<span class=\"status ");
+            client.print(output4State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output4State);
+            client.println("</span>");
+            client.println("<a href=\"/4/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/4/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-/* Repeat for each group: 32, 25, 27, 16, 17, 21, 22, 2 */
-client.println("<div class=\"control-group\">");
-client.print("<span>144 to 1296 triband</span>");
-client.print("<span class=\"status ");
-client.print(output32State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output32State);
-client.println("</span>");
-client.println("<a href=\"/32/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/32/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // 144 to 1296 triband
+            client.println("<div class=\"control-group\">");
+            client.print("<span>144 to 1296 triband</span>");
+            client.print("<span class=\"status ");
+            client.print(output32State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output32State);
+            client.println("</span>");
+            client.println("<a href=\"/32/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/32/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("<div class=\"control-group\">");
-client.print("<span>2304Ghz</span>");
-client.print("<span class=\"status ");
-client.print(output25State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output25State);
-client.println("</span>");
-client.println("<a href=\"/25/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/25/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // 2304Ghz
+            client.println("<div class=\"control-group\">");
+            client.print("<span>2304Ghz</span>");
+            client.print("<span class=\"status ");
+            client.print(output25State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output25State);
+            client.println("</span>");
+            client.println("<a href=\"/25/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/25/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("<div class=\"control-group\">");
-client.print("<span>Omnie enable</span>");
-client.print("<span class=\"status ");
-client.print(output27State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output27State);
-client.println("</span>");
-client.println("<a href=\"/27/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/27/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // Omnie enable
+            client.println("<div class=\"control-group\">");
+            client.print("<span>Omnie enable</span>");
+            client.print("<span class=\"status ");
+            client.print(output27State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output27State);
+            client.println("</span>");
+            client.println("<a href=\"/27/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/27/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("<div class=\"control-group\">");
-client.print("<span>5760Ghz</span>");
-client.print("<span class=\"status ");
-client.print(output16State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output16State);
-client.println("</span>");
-client.println("<a href=\"/16/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/16/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // 5760Ghz
+            client.println("<div class=\"control-group\">");
+            client.print("<span>5760Ghz</span>");
+            client.print("<span class=\"status ");
+            client.print(output16State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output16State);
+            client.println("</span>");
+            client.println("<a href=\"/16/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/16/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("<div class=\"control-group\">");
-client.print("<span>triband dish</span>");
-client.print("<span class=\"status ");
-client.print(output17State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output17State);
-client.println("</span>");
-client.println("<a href=\"/17/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/17/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // triband dish
+            client.println("<div class=\"control-group\">");
+            client.print("<span>triband dish</span>");
+            client.print("<span class=\"status ");
+            client.print(output17State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output17State);
+            client.println("</span>");
+            client.println("<a href=\"/17/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/17/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("<div class=\"control-group\">");
-client.print("<span>IO21</span>");
-client.print("<span class=\"status ");
-client.print(output21State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output21State);
-client.println("</span>");
-client.println("<a href=\"/21/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/21/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // IO21
+            client.println("<div class=\"control-group\">");
+            client.print("<span>IO21</span>");
+            client.print("<span class=\"status ");
+            client.print(output21State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output21State);
+            client.println("</span>");
+            client.println("<a href=\"/21/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/21/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("<div class=\"control-group\">");
-client.print("<span>IO22</span>");
-client.print("<span class=\"status ");
-client.print(output22State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output22State);
-client.println("</span>");
-client.println("<a href=\"/22/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/22/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // IO22
+            client.println("<div class=\"control-group\">");
+            client.print("<span>IO22</span>");
+            client.print("<span class=\"status ");
+            client.print(output22State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output22State);
+            client.println("</span>");
+            client.println("<a href=\"/22/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/22/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("<div class=\"control-group\">");
-client.print("<span>LED</span>");
-client.print("<span class=\"status ");
-client.print(output2State == "on" ? "on" : "off");
-client.print("\">");
-client.print(output2State);
-client.println("</span>");
-client.println("<a href=\"/2/on\"><button class=\"button\">ON</button></a>");
-client.println("<a href=\"/2/off\"><button class=\"button button2\">OFF</button></a>");
-client.println("</div>");
+            // LED
+            client.println("<div class=\"control-group\">");
+            client.print("<span>LED</span>");
+            client.print("<span class=\"status ");
+            client.print(output2State == "on" ? "on" : "off");
+            client.print("\">");
+            client.print(output2State);
+            client.println("</span>");
+            client.println("<a href=\"/2/on\"><button class=\"button\">ON</button></a>");
+            client.println("<a href=\"/2/off\"><button class=\"button button2\">OFF</button></a>");
+            client.println("</div>");
 
-client.println("</div></body></html>");
+            client.println("</div></body></html>");
             
             // The HTTP response ends with another blank line
             client.println();
             // Break out of the while loop
             break;
-            }
-
+                                  
           } else {   // if you got a newline, then clear currentLine
             currentLine = "";
           }
+
+      
         } else if (c != '\r') {  // if you got anything else but a carriage return character,
           currentLine += c;      // add it to the end of the currentLine
         }
@@ -374,7 +378,7 @@ client.println("</div></body></html>");
     header = "";
     // Close the connection
     client.stop();
-    Serial.println("Client disconnected.");
+        Serial.println("Client disconnected.");
     Serial.println("");
   }
 }
