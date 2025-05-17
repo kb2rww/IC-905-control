@@ -14,6 +14,28 @@ IPAddress local_ip(192,168,0,123);
 IPAddress gateway(192,168,0,1);
 IPAddress subnet(255,255,255,0);
 
+// Helper to generate a control group with a toggle button
+void generateControlGroup(WiFiClient &client, const char* label, int pin, const String& state) {
+  client.println("<div class=\"control-group\">");
+  client.print("<span>");
+  client.print(label);
+  client.println("</span>");
+  client.print("<span class=\"status ");
+  client.print(state == "on" ? "on" : "off");
+  client.print("\">");
+  client.print(state);
+  client.println("</span>");
+  client.print("<button class=\"toggle-btn ");
+  client.print(state == "on" ? "on" : "off");
+  client.print("\" onclick=\"toggleGPIO('");
+  client.print(pin);
+  client.print("','");
+  client.print(state == "on" ? "off" : "on");
+  client.print("')\">");
+  client.print(state == "on" ? "Turn OFF" : "Turn ON");
+  client.println("</button>");
+  client.println("</div>");
+}
 // Set web server port number to 80
 WiFiServer server(80);
 
@@ -218,146 +240,42 @@ void loop(){
 
             // Display the HTML web page
             client.println("<!DOCTYPE html><html>");
-            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+           client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+           "<title>IC-905 ESP32 Control</title>"
            "<link rel=\"icon\" href=\"data:,\">"
-            "<style>"
-            "body{background:linear-gradient(135deg,#232526 0%,#414345 100%);color:#fff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;min-height:100vh;}"
-            ".container{background:rgba(255,255,255,0.08);border-radius:16px;box-shadow:0 6px 32px rgba(0,0,0,0.2);max-width:500px;margin:40px auto;padding:32px 24px;text-align:center;}"
-            "h1{margin-bottom:8px;font-size:2.2em;font-weight:700;letter-spacing:2px;}"
-            ".status{display:inline-block;margin-left:10px;padding:3px 12px;border-radius:12px;font-size:0.95em;font-weight:600;background:#333;color:#fafafa;}"
-            ".status.on{background:#4CAF50;color:#fff;}"
-            ".status.off{background:#f44336;color:#fff;}"
-            ".control-group{margin:22px 0 10px 0;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);}"
-            ".button{background-color:#555555;border:none;color:white;padding:16px 40px;text-decoration:none;font-size:1.15em;margin:6px 3px;cursor:pointer;border-radius:8px;transition:background 0.2s,transform 0.1s;box-shadow:0 2px 8px rgba(0,0,0,0.18);}"
-            ".button2{background-color:#4CAF50;}"
-            ".button:hover,.button2:hover{background-color:#222;transform:scale(1.04);}"
-            "@media (max-width:600px){.container{padding:12px 4px;}.button,.button2{width:95%;font-size:1.05em;}}"
-            "</style></head><body>");
-            client.println("<div class=\"container\">");
-            client.println("<h1>IC-905 Control</h1>");
-            client.println("<p style=\"margin-bottom:28px; color:#bbb;\">ESP32 Web Server Interface</p>");
+           "<style>"
+           "body{background:linear-gradient(135deg,#232526 0%,#414345 100%);color:#fff;font-family:'Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;min-height:100vh;}"
+           ".container{background:rgba(255,255,255,0.08);border-radius:16px;box-shadow:0 6px 32px rgba(0,0,0,0.2);max-width:520px;margin:40px auto;padding:32px 24px 24px 24px;text-align:center;}"
+           "h1{margin-bottom:8px;font-size:2.2em;font-weight:700;letter-spacing:2px;}"
+           ".status{display:inline-block;margin-left:10px;padding:3px 12px;border-radius:12px;font-size:0.95em;font-weight:600;background:#333;color:#fafafa;}"
+           ".status.on{background:#4CAF50;color:#fff;}"
+           ".status.off{background:#f44336;color:#fff;}"
+           ".control-group{margin:22px 0 10px 0;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);}"
+           ".toggle-btn{padding:16px 40px;font-size:1.15em;border-radius:8px;border:none;cursor:pointer;transition:background 0.2s;margin-top:10px;margin-bottom:4px;}"
+           ".toggle-btn.on{background:#4CAF50;color:#fff;}"
+           ".toggle-btn.off{background:#f44336;color:#fff;}"
+           "@media (max-width:600px){.container{padding:12px 4px;}.toggle-btn{width:95%;font-size:1.05em;}}"
+           "</style>"
+           "<script>"
+           "function toggleGPIO(pin, state){window.location.href='/' + pin + '/' + state;}"
+           "</script></head><body>"
+           "<div class=\"container\">"
+           "<h1>IC-905 Control</h1>"
+          "<p style=\"margin-bottom:28px; color:#bbb;\">ESP32 Web Server Interface</p>"
+         );
 
-            // Motor forward
-            client.println("<div class=\"control-group\">");
-            client.print("<span>Motor forward</span>");
-            client.print("<span class=\"status ");
-            client.print(output0State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output0State);
-            client.println("</span>");
-            client.println("<a href=\"/0/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/0/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
+         generateControlGroup(client, "Motor forward", 0, output0State);
+         generateControlGroup(client, "Motor reverse", 4, output4State);
+         generateControlGroup(client, "144 to 1296 triband", 32, output32State);
+         generateControlGroup(client, "2304Ghz", 25, output25State);
+         generateControlGroup(client, "Omnie enable", 27, output27State);
+         generateControlGroup(client, "5760Ghz", 16, output16State);
+         generateControlGroup(client, "triband dish", 17, output17State);
+         generateControlGroup(client, "IO21", 21, output21State);
+         generateControlGroup(client, "IO22", 22, output22State);
+         generateControlGroup(client, "LED", 2, output2State);
 
-            // Motor reverse
-            client.println("<div class=\"control-group\">");
-            client.print("<span>Motor reverse</span>");
-            client.print("<span class=\"status ");
-            client.print(output4State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output4State);
-            client.println("</span>");
-            client.println("<a href=\"/4/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/4/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            // 144 to 1296 triband
-            client.println("<div class=\"control-group\">");
-            client.print("<span>144 to 1296 triband</span>");
-            client.print("<span class=\"status ");
-            client.print(output32State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output32State);
-            client.println("</span>");
-            client.println("<a href=\"/32/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/32/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            // 2304Ghz
-            client.println("<div class=\"control-group\">");
-            client.print("<span>2304Ghz</span>");
-            client.print("<span class=\"status ");
-            client.print(output25State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output25State);
-            client.println("</span>");
-            client.println("<a href=\"/25/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/25/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            // Omnie enable
-            client.println("<div class=\"control-group\">");
-            client.print("<span>Omnie enable</span>");
-            client.print("<span class=\"status ");
-            client.print(output27State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output27State);
-            client.println("</span>");
-            client.println("<a href=\"/27/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/27/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            // 5760Ghz
-            client.println("<div class=\"control-group\">");
-            client.print("<span>5760Ghz</span>");
-            client.print("<span class=\"status ");
-            client.print(output16State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output16State);
-            client.println("</span>");
-            client.println("<a href=\"/16/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/16/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            // triband dish
-            client.println("<div class=\"control-group\">");
-            client.print("<span>triband dish</span>");
-            client.print("<span class=\"status ");
-            client.print(output17State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output17State);
-            client.println("</span>");
-            client.println("<a href=\"/17/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/17/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            // IO21
-            client.println("<div class=\"control-group\">");
-            client.print("<span>IO21</span>");
-            client.print("<span class=\"status ");
-            client.print(output21State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output21State);
-            client.println("</span>");
-            client.println("<a href=\"/21/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/21/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            // IO22
-            client.println("<div class=\"control-group\">");
-            client.print("<span>IO22</span>");
-            client.print("<span class=\"status ");
-            client.print(output22State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output22State);
-            client.println("</span>");
-            client.println("<a href=\"/22/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/22/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            // LED
-            client.println("<div class=\"control-group\">");
-            client.print("<span>LED</span>");
-            client.print("<span class=\"status ");
-            client.print(output2State == "on" ? "on" : "off");
-            client.print("\">");
-            client.print(output2State);
-            client.println("</span>");
-            client.println("<a href=\"/2/on\"><button class=\"button\">ON</button></a>");
-            client.println("<a href=\"/2/off\"><button class=\"button button2\">OFF</button></a>");
-            client.println("</div>");
-
-            client.println("</div></body></html>");
+         client.println("</div></body></html>");
             
             // The HTTP response ends with another blank line
             client.println();
