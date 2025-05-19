@@ -22,8 +22,8 @@ GpioControl controls[] = {
   {27, "Omnie enable",      "off"},
   {16, "5760Ghz",           "off"},
   {17, "triband dish",      "off"},
-  {21, "IO21",              "off"},
-  {22, "IO22",              "off"},
+  {18, "IO18",              "off"},
+  {26, "IO26",              "off"},
   {2,  "LED",               "off"}
 };
 // Calculate the total number of GPIO controls (for use in loops)
