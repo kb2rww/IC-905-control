@@ -1,17 +1,17 @@
 // =======================================================================
-// IC905_web_server_2.ino
+// IC905_web_server_3.ino
 // Main entry point for the IC-905 ESP32 Web Server Control project.
-// Now includes robust WiFi auto-reconnection in the main loop.
+// Includes robust WiFi auto-reconnection logic.
 // =======================================================================
 
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
+#define SCREEN_HEIGHT 32 // 32 or 64 depending on the screen
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-#include "WiFiSetup.h"    // Handles WiFi connection and configuration, including multi-SSID attempts
+#include "WiFiSetup.h"    // Handles WiFi connection and configuration
 #include "GpioControl.h"  // Handles GPIO pin management and HTTP parsing for GPIO
 #include "WebPage.h"      // Handles dynamic web page generation for the UI
 
@@ -38,18 +38,14 @@ void setup() {
   display.println("Starting...");
   display.display();
 
-  setupWiFi();            // Attempt to connect to available WiFi networks. Only runs once here.
+  setupWiFi();            // Attempt to connect to available WiFi networks
   server.begin();         // Start the web server to listen for incoming clients
 }
 
-// =======================================================================
-// Main loop - now includes WiFi auto-reconnect logic
-// =======================================================================
 void loop() {
-  // ---------------------------------------------------------------------
+  // -------------------------
   // WiFi Auto-Reconnect Block
-  // ---------------------------------------------------------------------
-  // If WiFi connection is lost, attempt to reconnect.
+  // -------------------------
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi lost. Attempting to reconnect...");
     display.clearDisplay();
@@ -59,7 +55,7 @@ void loop() {
     display.println("Reconnecting...");
     display.display();
 
-    // WiFiMulti.run() will try all SSIDs added, and only returns WL_CONNECTED if successful
+    // Try to reconnect to any available WiFi in your list
     if (wifiMulti.run() == WL_CONNECTED) {
       Serial.println("WiFi reconnected!");
       display.clearDisplay();
@@ -72,17 +68,14 @@ void loop() {
       display.println(WiFi.localIP());
       display.display();
     } else {
-      // Still not connected, keep trying every second
-      delay(1000);
-      return; // Skip rest of loop until WiFi is restored
+      delay(1000); // Wait a bit before trying again
+      return;      // Skip the rest of the loop until WiFi is restored
     }
   }
 
-  // ---------------------------------------------------------------------
-  // Main Web Server Logic (unchanged)
-  // ---------------------------------------------------------------------
+  // ---- Main Web Server Logic ----
   WiFiClient client = server.available();
-  if (client) {  // If a client is connected
+  if (client) {
     currentTime = millis();
     previousTime = currentTime;
     Serial.println("New Client found.");
@@ -90,7 +83,6 @@ void loop() {
     String header = "";
     String currentLine = "";
 
-    // Stay in this loop while the client is connected and we haven't timed out
     while (client.connected() && currentTime - previousTime <= timeoutTime) {
       currentTime = millis();
 
