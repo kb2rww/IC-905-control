@@ -46,42 +46,50 @@ void setup() {
 void loop() {
   // WiFi Auto-Reconnect Block
   if (WiFi.status() != WL_CONNECTED) {
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.setTextSize(1);
-    display.println("WiFi lost!");
-    display.println("Reconnecting...");
-    display.display();
+    static unsigned long lastAttemptTime = 0;
+    unsigned long now = millis();
 
-    // Keep trying to reconnect until successful
-    while (WiFi.status() != WL_CONNECTED) {
-      wifiMulti.run();
-      delay(2000); // Wait 2 seconds between attempts
+    // Only attempt reconnect every 2 seconds
+    if (now - lastAttemptTime > 2000) {
+      lastAttemptTime = now;
+      if (wifiMulti.run() == WL_CONNECTED) {
+        Serial.println("WiFi reconnected!");
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.setTextSize(1);
+        display.println("WiFi restored!");
+        display.print("SSID: ");
+        display.println(WiFi.SSID());
+        display.print("IP: ");
+        display.println(WiFi.localIP());
+        display.display();
+      } else {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.setTextSize(1);
+        display.println("WiFi lost!");
+        display.println("Reconnecting...");
+        display.display();
+        Serial.println("WiFi lost! Reconnecting...");
+      }
     }
-
-    // Once reconnected
-    Serial.println("WiFi reconnected!");
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.setTextSize(1);
-    display.println("WiFi restored!");
-    display.print("SSID: ");
-    display.println(WiFi.SSID());
-    display.print("IP: ");
-    display.println(WiFi.localIP());
-    display.display();
+    // Skip server logic if WiFi is down
+    return;
   }
-  // --------------- Main Web Server Logic -------------------
+
+  // ---- Main Web Server Logic ----
   WiFiClient client = server.available();
   if (client) {
-    currentTime = millis();
-    previousTime = currentTime;
+    unsigned long currentTime = millis();
+    unsigned long previousTime = currentTime;
+    const long timeoutTime = 2000; // Timeout duration (2 seconds)
+
     Serial.println("New Client found.");
 
     String header = "";
     String currentLine = "";
 
-    while (client.connected() && currentTime - previousTime <= timeoutTime) {
+    while (client.connected() && millis() - previousTime <= timeoutTime) {
       currentTime = millis();
 
       if (client.available()) {
