@@ -10,7 +10,7 @@
 #include <WiFi.h>         // ESP32 WiFi library
 #include <WiFiMulti.h>    // Allows cycling through multiple WiFi networks
 #include <Adafruit_SSD1306.h>
-extern Adafruit_SSD1306 display;
+extern Adafruit_SSD1306 display; // Declare display from main .ino
 
 // List of SSIDs (WiFi network names) to try connecting to
 const char* ssids[] = {"kb2rww", "kb2rwwp", "KB2RWW Silverado"};
@@ -37,7 +37,6 @@ void setupWiFi() {
     Serial.println(WiFi.SSID());                // Print SSID
   
     // --- Add this block to display SSID and IP ---
-  extern Adafruit_SSD1306 display; // Declare display from main .ino
   display.clearDisplay();
   display.setCursor(0, 0);
   display.setTextSize(1);
