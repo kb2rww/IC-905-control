@@ -1,5 +1,5 @@
 // =======================================================================
-// IC905_web_server_3.ino
+// IC905_web_server_2.ino
 // Main entry point for the IC-905 ESP32 Web Server Control project.
 // Includes robust WiFi auto-reconnection logic.
 // =======================================================================
@@ -46,10 +46,10 @@ void loop() {
   // -------------------------
   // WiFi Auto-Reconnect Block
   // -------------------------
-  // Check and reconnect WiFi if needed
   if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi lost. Attempting to reconnect...");
     wifiMulti.run();  // This will attempt reconnection
-  }
+  
     display.clearDisplay();
     display.setCursor(0, 0);
     display.setTextSize(1);
@@ -77,13 +77,14 @@ void loop() {
 
   // ---- Main Web Server Logic ----
   WiFiClient client = server.available();
-  if (client) {
-    currentTime = millis();
-    previousTime = currentTime;
+  if (client) { // If a client is connected
+    currentTime = millis(); // Update the current time
+    previousTime = currentTime; // Set previous time to now (reset timeout)
     Serial.println("New Client found.");
 
-    String header = "";
-    String currentLine = "";
+    // Stay in this loop while the client is connected and we haven't timed out
+    String header = ""; // Will hold the full HTTP request header
+    String currentLine = ""; // Used to capture each line of the request
 
     while (client.connected() && currentTime - previousTime <= timeoutTime) {
       currentTime = millis();
