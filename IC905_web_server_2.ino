@@ -6,6 +6,7 @@
 // main loop which handles incoming HTTP client connections.
 // =======================================================================
 
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #include "WiFiSetup.h"    // Handles WiFi connection and configuration
 #include "GpioControl.h"  // Handles GPIO pin management and HTTP parsing for GPIO
 #include "WebPage.h"      // Handles dynamic web page generation for the UI
