@@ -9,6 +9,8 @@
 #pragma once
 #include <WiFi.h>         // ESP32 WiFi library
 #include <WiFiMulti.h>    // Allows cycling through multiple WiFi networks
+#include <Adafruit_SSD1306.h>
+extern Adafruit_SSD1306 display;
 
 // List of SSIDs (WiFi network names) to try connecting to
 const char* ssids[] = {"kb2rww", "kb2rwwp", "KB2RWW Silverado"};
