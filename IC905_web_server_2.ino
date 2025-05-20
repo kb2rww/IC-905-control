@@ -2,29 +2,30 @@
 // IC905_web_server_2.ino
 // Main entry point for the IC-905 ESP32 Web Server Control project.
 // Includes robust WiFi auto-reconnection logic.
+// Robust WiFi, AP fallback, OLED status
 // =======================================================================
 
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 32 // 32 or 64 depending on the screen
+#define SCREEN_HEIGHT 32 // 32 or 64 depending on your screen
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 #include "WiFiSetup.h"    // Handles WiFi connection and configuration
 #include "GpioControl.h"  // Handles GPIO pin management and HTTP parsing for GPIO
 #include "WebPage.h"      // Handles dynamic web page generation for the UI
 
-WiFiServer server(80);    // Create an instance of the ESP32 web server on port 80
+WiFiServer server(80);    // ESP32 web server on port 80
 
-// Variables used for timeout management
+// Timeout management for web client
 unsigned long currentTime = millis();
 unsigned long previousTime = 0;
-const long timeoutTime = 2000; // Timeout duration (2 seconds)
+const long timeoutTime = 2000; // 2 seconds
 
 void setup() {
   Serial.begin(115200);
-  setupGPIO();            // Initialize all GPIO pins as outputs and set them to LOW ("off")
+  setupGPIO();
 
   // Initialize SSD1306 display
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
@@ -38,53 +39,57 @@ void setup() {
   display.println("Starting...");
   display.display();
 
-  setupWiFi();            // Attempt to connect to available WiFi networks
-  server.begin();         // Start the web server to listen for incoming clients
+  setupWiFi();
+  server.begin();
 }
 
 void loop() {
-  // -------------------------
-  // WiFi Auto-Reconnect Block
-  // -------------------------
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi lost. Attempting to reconnect...");
-    wifiMulti.run();  // This will attempt reconnection
-  
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.setTextSize(1);
-    display.println("WiFi lost!");
-    display.println("Reconnecting...");
-    display.display();
+  // --------------- WiFi Auto-Reconnect Block ---------------
+  static unsigned long lastReconnectAttempt = 0;
+  static bool wasDisconnected = false;
 
-    // Try to reconnect to any available WiFi in your list
-    if (wifiMulti.run() == WL_CONNECTED) {
-      Serial.println("WiFi reconnected!");
+  if (WiFi.status() != WL_CONNECTED) {
+    if (!wasDisconnected) {
+      Serial.println("WiFi lost! Reconnecting...");
       display.clearDisplay();
       display.setCursor(0, 0);
       display.setTextSize(1);
-      display.println("WiFi restored!");
-      display.print("SSID: ");
-      display.println(WiFi.SSID());
-      display.print("IP: ");
-      display.println(WiFi.localIP());
+      display.println("WiFi lost!");
+      display.println("Reconnecting...");
       display.display();
-    } else {
-      delay(1000); // Wait a bit before trying again
-      return;      // Skip the rest of the loop until WiFi is restored
+      wasDisconnected = true;
     }
+
+    if (millis() - lastReconnectAttempt > 2000) {
+      lastReconnectAttempt = millis();
+      if (wifiMulti.run() == WL_CONNECTED) {
+        Serial.println("WiFi reconnected!");
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.setTextSize(1);
+        display.println("WiFi restored!");
+        display.print("SSID: ");
+        display.println(WiFi.SSID());
+        display.print("IP: ");
+        display.println(WiFi.localIP());
+        display.display();
+        wasDisconnected = false;
+      }
+    }
+    return; // Wait until reconnected before continuing
+  } else {
+    wasDisconnected = false; // Ensure flag is false while connected
   }
 
-  // ---- Main Web Server Logic ----
+  // --------------- Main Web Server Logic -------------------
   WiFiClient client = server.available();
-  if (client) { // If a client is connected
-    currentTime = millis(); // Update the current time
-    previousTime = currentTime; // Set previous time to now (reset timeout)
+  if (client) {
+    currentTime = millis();
+    previousTime = currentTime;
     Serial.println("New Client found.");
 
-    // Stay in this loop while the client is connected and we haven't timed out
-    String header = ""; // Will hold the full HTTP request header
-    String currentLine = ""; // Used to capture each line of the request
+    String header = "";
+    String currentLine = "";
 
     while (client.connected() && currentTime - previousTime <= timeoutTime) {
       currentTime = millis();
