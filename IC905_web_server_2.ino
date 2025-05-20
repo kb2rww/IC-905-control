@@ -46,8 +46,10 @@ void loop() {
   // -------------------------
   // WiFi Auto-Reconnect Block
   // -------------------------
+  // Check and reconnect WiFi if needed
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi lost. Attempting to reconnect...");
+    wifiMulti.run();  // This will attempt reconnection
+  }
     display.clearDisplay();
     display.setCursor(0, 0);
     display.setTextSize(1);
