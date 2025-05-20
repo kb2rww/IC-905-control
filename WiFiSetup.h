@@ -34,6 +34,17 @@ void setupWiFi() {
     Serial.print("Connected to SSID: ");
     Serial.println(WiFi.SSID());                // Print SSID
   }
+    // --- Add this block to display SSID and IP ---
+  extern Adafruit_SSD1306 display; // Declare display from main .ino
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.setTextSize(1);
+  display.print("SSID: ");
+  display.println(WiFi.SSID());
+  display.print("IP: ");
+  display.println(WiFi.localIP());
+  display.display();
+  
   // Print final connection status and device IP for user reference
   Serial.println("Connected. The device can be found at IP address:");
   Serial.println(WiFi.localIP());
