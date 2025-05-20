@@ -6,20 +6,22 @@
 // main loop which handles incoming HTTP client connections.
 // =======================================================================
 
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64   // set to ether 32 or 64 depending on screan size
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #include "WiFiSetup.h"    // Handles WiFi connection and configuration
 #include "GpioControl.h"  // Handles GPIO pin management and HTTP parsing for GPIO
 #include "WebPage.h"      // Handles dynamic web page generation for the UI
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+
+
 
 // Create an instance of the ESP32 web server on port 80 (HTTP default)
 WiFiServer server(80);
 
-// OLED display width and height, adjust if your display is different
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64  // or 64 for 128x64 displays
+
 
 // Declare display object (I2C address is usually 0x3C)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
