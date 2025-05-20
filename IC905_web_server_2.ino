@@ -44,43 +44,33 @@ void setup() {
 }
 
 void loop() {
-  // --------------- WiFi Auto-Reconnect Block ---------------
-  static unsigned long lastReconnectAttempt = 0;
-  static bool wasDisconnected = false;
-
+  // WiFi Auto-Reconnect Block
   if (WiFi.status() != WL_CONNECTED) {
-    if (!wasDisconnected) {
-      Serial.println("WiFi lost! Reconnecting...");
-      display.clearDisplay();
-      display.setCursor(0, 0);
-      display.setTextSize(1);
-      display.println("WiFi lost!");
-      display.println("Reconnecting...");
-      display.display();
-      wasDisconnected = true;
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.setTextSize(1);
+    display.println("WiFi lost!");
+    display.println("Reconnecting...");
+    display.display();
+
+    // Keep trying to reconnect until successful
+    while (WiFi.status() != WL_CONNECTED) {
+      wifiMulti.run();
+      delay(2000); // Wait 2 seconds between attempts
     }
 
-    if (millis() - lastReconnectAttempt > 2000) {
-      lastReconnectAttempt = millis();
-      if (wifiMulti.run() == WL_CONNECTED) {
-        Serial.println("WiFi reconnected!");
-        display.clearDisplay();
-        display.setCursor(0, 0);
-        display.setTextSize(1);
-        display.println("WiFi restored!");
-        display.print("SSID: ");
-        display.println(WiFi.SSID());
-        display.print("IP: ");
-        display.println(WiFi.localIP());
-        display.display();
-        wasDisconnected = false;
-      }
-    }
-    return; // Wait until reconnected before continuing
-  } else {
-    wasDisconnected = false; // Ensure flag is false while connected
+    // Once reconnected
+    Serial.println("WiFi reconnected!");
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.setTextSize(1);
+    display.println("WiFi restored!");
+    display.print("SSID: ");
+    display.println(WiFi.SSID());
+    display.print("IP: ");
+    display.println(WiFi.localIP());
+    display.display();
   }
-
   // --------------- Main Web Server Logic -------------------
   WiFiClient client = server.available();
   if (client) {
