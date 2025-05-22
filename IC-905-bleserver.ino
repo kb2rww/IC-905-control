@@ -1,120 +1,161 @@
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+// ==== IC-905 BLE Server with ON/OFF State Tracking and Granular Comments ====
 
-// === BLE SERVICE AND CHARACTERISTIC UUIDS (Must match client) ===
-#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0" // Main BLE service
-#define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1" // Notification characteristic (server -> client)
-#define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2" // Write characteristic (client -> server)
+// --- INCLUDE REQUIRED LIBRARIES ---
+#include <BLEDevice.h>         // Core BLE functions
+#include <BLEServer.h>         // BLE server functionality
+#include <BLEUtils.h>          // BLE utility functions (UUIDs, etc.)
+#include <BLE2902.h>           // BLE descriptor (for notifications)
+#include <Arduino.h>
 
-// Declare pointers for server, service, and characteristics
-BLEServer* pServer = nullptr;
-BLEService* pService = nullptr;
-BLECharacteristic* pStatusChar = nullptr;
-BLECharacteristic* pCommandChar = nullptr;
+// --- BLE SERVICE & CHARACTERISTIC UUIDs ---
+// (MUST match the client code)
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
+#define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1"
+#define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2"
 
-// Variable to track connection state
-bool deviceConnected = false;
+// --- BLE Server Pointers ---
+BLEServer* pServer = nullptr;           // BLE server instance
+BLEService* pService = nullptr;         // Main BLE service
+BLECharacteristic* pStatusChar = nullptr;   // Characteristic for server->client notifications
+BLECharacteristic* pCommandChar = nullptr;  // Characteristic for client->server writes
 
-// ================== Server Callback Class ================== //
-// Handles client connect/disconnect events
+// --- Connection State Variable ---
+bool deviceConnected = false;           // True = client connected, false = not connected
+
+// --- COMMANDS AND STATE TRACKING ---
+// List of supported commands/buttons (must match client exactly)
+#define NUM_COMMANDS 6
+const char* COMMANDS[NUM_COMMANDS] = {
+  "control power",    // Button 1
+  "motor left",       // Button 2
+  "motor right",      // Button 3
+  "relay 1",          // Button 4
+  "relay 2",          // Button 5
+  "relay 3"           // Button 6
+};
+// Array to track ON/OFF state for each command: false = OFF, true = ON
+bool commandStates[NUM_COMMANDS] = {false, false, false, false, false, false};
+
+// --- HELPER FUNCTION: Find Command Index ---
+// Returns the index for the given command string; -1 if not found
+int getCommandIndex(const String& value) {
+  for (int i = 0; i < NUM_COMMANDS; i++) {
+    if (value == COMMANDS[i]) return i;
+  }
+  return -1;
+}
+
+// --- BLE SERVER CALLBACK CLASS ---
+// Handles client connect and disconnect events
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) override {
     deviceConnected = true;
     Serial.println("[BLE] Client connected");
   }
-
   void onDisconnect(BLEServer* pServer) override {
     deviceConnected = false;
     Serial.println("[BLE] Client disconnected");
-    // Restart advertising so another client can connect
+    // Restart advertising to allow new connections
     BLEDevice::getAdvertising()->start();
   }
 };
 
-// ================== Command Characteristic Callback ================== //
+// --- BLE CHARACTERISTIC CALLBACK CLASS ---
 // Handles when the client writes to the command characteristic
 class CommandCharCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* pCharacteristic) override {
-    String value = pCharacteristic->getValue(); // Get data written by client
+    String value = pCharacteristic->getValue(); // Get string written by client
 
-    // Print received data to serial for debugging
     Serial.print("[BLE] Received command: ");
-    for (size_t i = 0; i < value.length(); ++i) {
-      Serial.print(value[i]);
-    }
-    Serial.println();
+    Serial.println(value);
 
-    // You can parse 'value' and act accordingly here!
-    // For example, if you expect ASCII commands:
+    // Special command: PING (reply with PONG)
     if (value == "PING") {
-      // Respond to a 'PING' command by notifying status
-      pStatusChar->setValue("PONG");      // Set status characteristic value
-      pStatusChar->notify();              // Notify client of new status
+      pStatusChar->setValue("PONG");
+      pStatusChar->notify();
       Serial.println("[BLE] Sent PONG response");
+      return;
     }
-    // Add more command handling as needed
+
+    // Find if the command matches one of the known commands/buttons
+    int idx = getCommandIndex(value);
+    if (idx >= 0) {
+      // Toggle the ON/OFF state for the command/button
+      commandStates[idx] = !commandStates[idx];
+      // Format notification message: e.g., "relay 1 on" or "relay 1 off"
+      String notifyMsg = String(COMMANDS[idx]) + (commandStates[idx] ? " on" : " off");
+      // Send updated state as BLE notification to client
+      pStatusChar->setValue(notifyMsg.c_str());
+      pStatusChar->notify();
+      Serial.print("[BLE] Status notified: ");
+      Serial.println(notifyMsg);
+    }
+    // For unknown commands, no action taken (could add error handling here if desired)
   }
 };
 
 void setup() {
+  // --- SERIAL DEBUGGING SETUP ---
   Serial.begin(115200);
   Serial.println("[BLE] Starting BLE Server...");
 
-  // 1. Initialize BLE device and set the advertised name
-  BLEDevice::init("IC905_BLE_Server");
+  // --- BLE INITIALIZATION ---
+  BLEDevice::init("IC905_BLE_Server");             // Set BLE device name
 
-  // 2. Create the BLE server object and set callback for connect/disconnect
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  // --- CREATE BLE SERVER AND SERVICE ---
+  pServer = BLEDevice::createServer();             // Create BLE server object
+  pServer->setCallbacks(new MyServerCallbacks());  // Set connect/disconnect callbacks
 
-  // 3. Create the BLE service using the defined UUID
-  pService = pServer->createService(SERVICE_UUID);
+  pService = pServer->createService(SERVICE_UUID); // Create main BLE service
 
-  // 4. Create the status characteristic (server -> client, notifications)
+  // --- CREATE STATUS CHARACTERISTIC (notifications: server -> client) ---
   pStatusChar = pService->createCharacteristic(
     STATUS_CHAR_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY // Only notify property (read-only for client)
+    BLECharacteristic::PROPERTY_NOTIFY               // Notify property only
   );
-  // Add descriptor for notifications (required by most clients)
-  pStatusChar->addDescriptor(new BLE2902());
-  // Optionally set an initial status value
-  pStatusChar->setValue("READY");
+  pStatusChar->addDescriptor(new BLE2902());        // Required for notifications
+  pStatusChar->setValue("READY");                   // Set initial status value
 
-  // 5. Create the command characteristic (client -> server, write)
+  // --- CREATE COMMAND CHARACTERISTIC (writes: client -> server) ---
   pCommandChar = pService->createCharacteristic(
     COMMAND_CHAR_UUID,
-    BLECharacteristic::PROPERTY_WRITE // Only write property (write-only for client)
+    BLECharacteristic::PROPERTY_WRITE                // Write property only
   );
-  // Set callback to handle incoming writes
-  pCommandChar->setCallbacks(new CommandCharCallbacks());
+  pCommandChar->setCallbacks(new CommandCharCallbacks()); // Set write handler
 
-  // 6. Start the BLE service
+  // --- START BLE SERVICE ---
   pService->start();
 
-  // 7. Start advertising the service so clients can find it
+  // --- START ADVERTISING (so clients can find us) ---
   BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID); // Advertise service UUID for discovery
-  pAdvertising->setScanResponse(true);        // Optional (allows scan response packets)
-  pAdvertising->setMinPreferred(0x06);        // Improve iOS compatibility
-  pAdvertising->setMinPreferred(0x12);        // Improve iOS compatibility
-  BLEDevice::startAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID); // Advertise our main service UUID
+  pAdvertising->setScanResponse(true);        // Enable scan response packets
+  pAdvertising->setMinPreferred(0x06);        // iOS compatibility tweak
+  pAdvertising->setMinPreferred(0x12);        // iOS compatibility tweak
+  BLEDevice::startAdvertising();              // Begin advertising
 
   Serial.println("[BLE] BLE server is now advertising!");
 }
 
 void loop() {
-  // Example: Periodically notify client with a status update if connected
+  // --- PERIODIC STATUS NOTIFICATION (Optional, shows all states every 3 seconds) ---
   static unsigned long lastNotify = 0;
   if (deviceConnected && millis() - lastNotify > 3000) {
     lastNotify = millis();
-    String msg = "STATUS: " + String(millis() / 1000) + "s";
-    pStatusChar->setValue(msg.c_str()); // Update status characteristic
-    pStatusChar->notify();              // Send notification to client
+
+    // Build a status string for all commands/buttons: e.g., "relay 1 on; relay 2 off; ..."
+    String msg;
+    for (int i = 0; i < NUM_COMMANDS; i++) {
+      msg += String(COMMANDS[i]) + (commandStates[i] ? " on" : " off");
+      if (i != NUM_COMMANDS - 1) msg += "; ";
+    }
+    // Send the status as a notification to the client
+    pStatusChar->setValue(msg.c_str());
+    pStatusChar->notify();
     Serial.print("[BLE] Status notified: ");
     Serial.println(msg);
   }
 
-  delay(100); // Small delay to avoid excessive CPU usage
+  // --- SMALL DELAY TO REDUCE CPU USAGE ---
+  delay(100);
 }
