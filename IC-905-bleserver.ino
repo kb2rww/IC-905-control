@@ -1,30 +1,34 @@
-// ==== IC-905 BLE Server with ON/OFF State Tracking and Granular Comments ====
+// ==== IC-905 BLE Server with QMC5883L Magnetometer True North Heading ====
 
 // --- INCLUDE REQUIRED LIBRARIES ---
-#include <BLEDevice.h>         // Core BLE functions
-#include <BLEServer.h>         // BLE server functionality
-#include <BLEUtils.h>          // BLE utility functions (UUIDs, etc.)
-#include <BLE2902.h>           // BLE descriptor (for notifications)
+// BLE libraries for ESP32 BLE server functionality
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 #include <Arduino.h>
 
+// QMC5883L Compass library for GY-271 sensor
+#include <QMC5883LCompass.h>
+
 // --- BLE SERVICE & CHARACTERISTIC UUIDs ---
-// (MUST match the client code)
+// (MUST match the client code for interoperability)
 #define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
 #define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1"
 #define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2"
 
 // --- BLE Server Pointers ---
-BLEServer* pServer = nullptr;           // BLE server instance
-BLEService* pService = nullptr;         // Main BLE service
-BLECharacteristic* pStatusChar = nullptr;   // Characteristic for server->client notifications
-BLECharacteristic* pCommandChar = nullptr;  // Characteristic for client->server writes
+BLEServer* pServer = nullptr;             // Pointer to BLE server instance
+BLEService* pService = nullptr;           // Pointer to main BLE service
+BLECharacteristic* pStatusChar = nullptr; // Pointer to status notify characteristic (server->client)
+BLECharacteristic* pCommandChar = nullptr;// Pointer to command write characteristic (client->server)
 
 // --- Connection State Variable ---
-bool deviceConnected = false;           // True = client connected, false = not connected
+bool deviceConnected = false;             // Tracks if BLE client is connected
 
 // --- COMMANDS AND STATE TRACKING ---
 // List of supported commands/buttons (must match client exactly)
-#define NUM_COMMANDS 6
+#define NUM_COMMANDS 8
 const char* COMMANDS[NUM_COMMANDS] = {
   "control power",    // Button 1
   "motor left",       // Button 2
@@ -32,9 +36,20 @@ const char* COMMANDS[NUM_COMMANDS] = {
   "relay 1",          // Button 4
   "relay 2",          // Button 5
   "relay 3"           // Button 6
+  "relay 4"           // Button 7
+  "relay 5"           // Button 8
 };
 // Array to track ON/OFF state for each command: false = OFF, true = ON
-bool commandStates[NUM_COMMANDS] = {false, false, false, false, false, false};
+bool commandStates[NUM_COMMANDS] = {false, false, false, false, false, false, false, false};
+
+// --- QMC5883L MAGNETOMETER SENSOR SETUP ---
+// Create a compass object for the GY-271 QMC5883L sensor
+QMC5883LCompass compass;
+
+// --- YOUR LOCAL MAGNETIC DECLINATION (IN DEGREES) ---
+// Find your location's value here: https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml
+// Example: -7.5 means subtract 7.5° to convert from magnetic north to true north
+const float MAGNETIC_DECLINATION = -12.66; // CHANGE THIS FOR YOUR LOCATION home is -12.66
 
 // --- HELPER FUNCTION: Find Command Index ---
 // Returns the index for the given command string; -1 if not found
@@ -77,6 +92,16 @@ class CommandCharCallbacks : public BLECharacteristicCallbacks {
       return;
     }
 
+    // Special command: READ_HEADING (client requests compass heading now)
+    if (value == "READ_HEADING") {
+      String headingMsg = getCompassHeadingString();
+      pStatusChar->setValue(headingMsg.c_str());
+      pStatusChar->notify();
+      Serial.print("[BLE] Sent heading (on demand): ");
+      Serial.println(headingMsg);
+      return;
+    }
+
     // Find if the command matches one of the known commands/buttons
     int idx = getCommandIndex(value);
     if (idx >= 0) {
@@ -94,10 +119,41 @@ class CommandCharCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
+// --- GET COMPASS HEADING STRING FUNCTION ---
+// Reads the QMC5883L sensor and returns a string with TRUE NORTH heading
+String getCompassHeadingString() {
+  compass.read(); // Fetch latest sensor values
+
+  // Get raw axis data (for advanced use; not needed here)
+  int x = compass.getX();
+  int y = compass.getY();
+  int z = compass.getZ();
+
+  // Get heading in degrees (magnetic north)
+  int magHeading = compass.getAzimuth(); // 0-359 degrees
+
+  // Apply declination correction to get true north heading
+  float trueHeading = magHeading + MAGNETIC_DECLINATION;
+  // Ensure trueHeading is in 0-359 range
+  if (trueHeading < 0) trueHeading += 360;
+  if (trueHeading >= 360) trueHeading -= 360;
+
+  // Compose a clear message for the client
+  //String msg = "HEADING:mag=" + String(magHeading) + ";true=" + String(trueHeading, 1);
+  String msg = "HEADING:" + String(trueHeading, 1); // sends "HEADING:115.5"
+  return msg;
+}
+
 void setup() {
   // --- SERIAL DEBUGGING SETUP ---
   Serial.begin(115200);
   Serial.println("[BLE] Starting BLE Server...");
+  Serial.println("[COMPASS] Initializing QMC5883L...");
+
+  // --- INIT QMC5883L COMPASS ---
+  compass.init();
+  // Optionally, set calibration for your sensor here if needed
+  // compass.setCalibration(xOffset, yOffset, scale);
 
   // --- BLE INITIALIZATION ---
   BLEDevice::init("IC905_BLE_Server");             // Set BLE device name
@@ -138,7 +194,7 @@ void setup() {
 }
 
 void loop() {
-  // --- PERIODIC STATUS NOTIFICATION (Optional, shows all states every 3 seconds) ---
+  // --- PERIODIC STATUS NOTIFICATION (Shows all states every 3 seconds) ---
   static unsigned long lastNotify = 0;
   if (deviceConnected && millis() - lastNotify > 3000) {
     lastNotify = millis();
@@ -154,6 +210,17 @@ void loop() {
     pStatusChar->notify();
     Serial.print("[BLE] Status notified: ");
     Serial.println(msg);
+  }
+
+  // --- PERIODIC COMPASS HEADING NOTIFICATION (Every 2 seconds) ---
+  static unsigned long lastCompassUpdate = 0;
+  if (deviceConnected && millis() - lastCompassUpdate > 2000) {
+    lastCompassUpdate = millis();
+    String headingMsg = getCompassHeadingString();
+    pStatusChar->setValue(headingMsg.c_str());
+    pStatusChar->notify();
+    Serial.print("[BLE] Sent heading: ");
+    Serial.println(headingMsg);
   }
 
   // --- SMALL DELAY TO REDUCE CPU USAGE ---
