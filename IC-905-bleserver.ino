@@ -1,13 +1,14 @@
 // ==== IC-905 BLE SERVER with HW-246 (QMC5883L) COMPASS Support ====
 // ---- EXTREMELY GRANULAR COMMENTARY VERSION ----
 
+// ==== IC-905 BLE SERVER with 8 BUTTONS/RELAYS and Compass Status ====
+
 // --- INCLUDE REQUIRED LIBRARIES ---
 #include <BLEDevice.h>         // Core BLE functions
 #include <BLEServer.h>         // BLE server functionality
 #include <BLEUtils.h>          // BLE utility functions (UUIDs, etc.)
 #include <BLE2902.h>           // BLE descriptor (for notifications)
 #include <Arduino.h>           // Arduino core
-#include <QMC5883LCompass.h>   // QMC5883L compass library for HW-246
 
 // --- BLE SERVICE & CHARACTERISTIC UUIDs ---
 // (MUST match the client code)
@@ -41,8 +42,9 @@ const char* COMMANDS[NUM_COMMANDS] = {
 // Array to track ON/OFF state for each command: false = OFF, true = ON
 bool commandStates[NUM_COMMANDS] = {false};
 
-// --- COMPASS OBJECT (QMC5883L/HW-246) ---
-QMC5883LCompass compass; // Create compass object
+// --- TRACK LAST SENT STATUS FOR STATE CHANGE DETECTION ---
+String lastSentStatus[NUM_COMMANDS]; // Stores last notified state for each command, e.g., "relay 1 on"
+float lastSentHeading = -999.0;      // Stores last sent heading value (initialized to impossible value)
 
 // --- HELPER FUNCTION: Find Command Index ---
 // Returns the index for the given command string; -1 if not found
@@ -51,6 +53,16 @@ int getCommandIndex(const String& value) {
     if (value == COMMANDS[i]) return i;
   }
   return -1;
+}
+
+// --- MOCKUP: GET CURRENT HEADING ---
+// Replace this with your real compass/heading reading!
+float getCurrentHeading() {
+  // For demonstration, we'll just increment heading value every call
+  static float heading = 0.0;
+  heading += 1.0;
+  if (heading > 359.9) heading = 0.0;
+  return heading;
 }
 
 // --- BLE SERVER CALLBACK CLASS ---
@@ -90,47 +102,27 @@ class CommandCharCallbacks : public BLECharacteristicCallbacks {
     if (idx >= 0) {
       // Toggle the ON/OFF state for the command/button
       commandStates[idx] = !commandStates[idx];
+
       // Format notification: e.g., "relay 1 on" or "relay 1 off"
       String notifyMsg = String(COMMANDS[idx]) + (commandStates[idx] ? " on" : " off");
-      // Send updated state as BLE notification to client
-      pStatusChar->setValue(notifyMsg.c_str());
-      pStatusChar->notify();
-      Serial.print("[BLE] Status notified: ");
-      Serial.println(notifyMsg);
+
+      // Only send if state actually changed (protects against double-toggles etc)
+      if (notifyMsg != lastSentStatus[idx]) {
+        pStatusChar->setValue(notifyMsg.c_str());
+        pStatusChar->notify();
+        lastSentStatus[idx] = notifyMsg;
+        Serial.print("[BLE] Status notified: ");
+        Serial.println(notifyMsg);
+      }
     }
     // For unknown commands, no action taken (could add error handling here if desired)
   }
 };
 
-// --- READ & FORMAT COMPASS HEADING ---
-// Returns heading as a string "xxx.x" degrees, always in range 0.0–359.9
-String getCompassHeadingString() {
-  compass.read(); // Update sensor values
-
-  // Get the azimuth (heading) in degrees, as a float
-  float heading = compass.getAzimuth();
-
-  // Normalize: ensure heading is positive and < 360.0
-  if (heading < 0.0) heading += 360.0;
-  heading = fmod(heading, 360.0);
-
-  // Format float to string with one decimal place (e.g., "273.8")
-  char headingStr[8];
-  dtostrf(heading, 5, 1, headingStr); // width=5, precision=1
-
-  // Remove leading spaces (dtostrf pads by default)
-  String cleanHeading = String(headingStr);
-  cleanHeading.trim();
-  return cleanHeading;
-}
-
 void setup() {
   // --- SERIAL DEBUGGING SETUP ---
   Serial.begin(115200);
   Serial.println("[BLE] Starting BLE Server...");
-
-  // --- INIT COMPASS SENSOR (HW-246/QMC5883L) ---
-  compass.init(); // Initialize QMC5883L hardware
 
   // --- BLE INITIALIZATION ---
   BLEDevice::init("IC905_BLE_Server");             // Set BLE device name
@@ -171,40 +163,36 @@ void setup() {
 }
 
 void loop() {
-  // --- PERIODIC STATUS NOTIFICATION (every 3 seconds if a client is connected) ---
-  static unsigned long lastNotify = 0;
-  if (deviceConnected && millis() - lastNotify > 3000) {
-    lastNotify = millis();
+  // --- PERIODIC HEADING NOTIFICATION ---
+  static unsigned long lastHeadingNotify = 0;
+  if (deviceConnected && millis() - lastHeadingNotify > 3000) { // Send heading every 3 seconds
+    lastHeadingNotify = millis();
 
-    // --- GET FORMATTED COMPASS HEADING (0.0–359.9° as string) ---
-    String headingStr = getCompassHeadingString();
+    float heading = getCurrentHeading(); // Get latest heading (replace with real reading)
 
-    // --- BUILD STATUS STRING ---
-    // Format: "heading: 273.8; relay 1 on; relay 2 off; ..."
-    String msg = "heading: ";
-    msg += headingStr;
-
-    // Append relay/button states
-    for (int i = 0; i < NUM_COMMANDS; i++) {
-      msg += "; ";
-      msg += String(COMMANDS[i]) + (commandStates[i] ? " on" : " off");
+    // Only send if heading changed by at least 1 degree (to avoid flooding)
+    if (abs(heading - lastSentHeading) >= 1.0) {
+      String headingMsg = "heading: " + String(heading, 1);
+      pStatusChar->setValue(headingMsg.c_str());
+      pStatusChar->notify();
+      lastSentHeading = heading;
+      Serial.print("[BLE] Compass notified: ");
+      Serial.println(headingMsg);
     }
-
-    // --- SEND STATUS AS BLE NOTIFICATION TO CLIENT ---
-    pStatusChar->setValue(msg.c_str());
-    pStatusChar->notify();
-    Serial.print("[BLE] Status notified: ");
-    Serial.println(msg);
   }
 
-  // --- SMALL DELAY TO REDUCE CPU USAGE ---
-  delay(100);
-}
+  // --- STATE CHANGE NOTIFICATIONS FOR EACH COMMAND ---
+  // Only send a notification if a state actually changed since last notify
+  for (int i = 0; i < NUM_COMMANDS; i++) {
+    String currentStatus = String(COMMANDS[i]) + (commandStates[i] ? " on" : " off");
+    if (currentStatus != lastSentStatus[i]) {
+      pStatusChar->setValue(currentStatus.c_str());
+      pStatusChar->notify();
+      lastSentStatus[i] = currentStatus;
+      Serial.print("[BLE] State change notified: ");
+      Serial.println(currentStatus);
+    }
+  }
 
-/*
-  - This code reads the HW-246 (QMC5883L) compass every 3 seconds, formats the heading as "0.0–359.9" float, and sends it to the client.
-  - Requires the QMC5883LCompass library. Wire up SCL/SDA for I2C.
-  - The Nextion display should parse and show the heading as a float.
-  - Relay/button status messages are unchanged.
-  - All logic blocks are heavily commented for clarity.
-*/
+  delay(20); // Reduce CPU usage, adjust as necessary
+}
