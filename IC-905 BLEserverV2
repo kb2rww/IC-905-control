@@ -2,56 +2,57 @@
 // --- ESP32 BLE server for radio hardware control with relays, motors, power, and compass sensor ---
 // --- EXTREMELY GRANULAR COMMENTS AND DEBUG SERIAL OUTPUT VERSION ---
 
-#include <BLEDevice.h>         // ESP32 BLE core library
-#include <BLEServer.h>         // BLE server functionality
+#include <BLEDevice.h>         // ESP32 BLE core library: Bluetooth Low Energy
+#include <BLEServer.h>         // BLE server for hosting GATT service
 #include <BLEUtils.h>          // BLE utility classes
-#include <BLE2902.h>           // BLE notification descriptor
+#include <BLE2902.h>           // For notification descriptor
 #include <Arduino.h>           // Arduino core
-#include <QMC5883LCompass.h>   // QMC5883L compass library
+#include <QMC5883LCompass.h>   // QMC5883L compass sensor library
 
 // ========================== I2C Pins for Compass Sensor ==========================
 #define I2C_SDA 21             // I2C data pin (connects to SDA on QMC5883L)
 #define I2C_SCL 22             // I2C clock pin (connects to SCL on QMC5883L)
 
 // ========================== Output Pin Definitions ===============================
-// ---- Change these pin numbers to match your actual wiring! ----
-#define POWER_PIN       23     // GPIO for radio power relay
+// ---- CHANGE THESE IF YOUR WIRING IS DIFFERENT! ----
+#define POWER_PIN       23     // GPIO for main power relay
 #define MOTOR_LEFT_PIN  19     // GPIO for motor left control
 #define MOTOR_RIGHT_PIN 18     // GPIO for motor right control
 #define MOTOR_STOP_PIN   5     // GPIO for motor stop control
-
 #define RELAY1_PIN      12     // GPIO for relay 1
-#define RELAY2_PIN      4     // GPIO for relay 2
+#define RELAY2_PIN      13     // GPIO for relay 2
 #define RELAY3_PIN      14     // GPIO for relay 3
 #define RELAY4_PIN      27     // GPIO for relay 4
-#define RELAY5_PIN      25     // GPIO for relay 5
+#define RELAY5_PIN      26     // GPIO for relay 5
 
 // ========================== BLE UUIDs (MUST MATCH CLIENT) ========================
 #define SERVICE_UUID      "12345678-1234-5678-1234-56789abcdef0"
 #define STATUS_CHAR_UUID  "12345678-1234-5678-1234-56789abcdef1"
 #define COMMAND_CHAR_UUID "12345678-1234-5678-1234-56789abcdef2"
 
-// ========================== BLE Server Pointers ==================================
-BLEServer* pServer = nullptr;
-BLEService* pService = nullptr;
-BLECharacteristic* pStatusChar = nullptr;
-BLECharacteristic* pCommandChar = nullptr;
-bool deviceConnected = false;  // True if a BLE client is connected
+// ========================== BLE Server Global Pointers ===========================
+BLEServer* pServer = nullptr;               // BLE server object
+BLEService* pService = nullptr;             // BLE service object
+BLECharacteristic* pStatusChar = nullptr;   // BLE notify characteristic (status out)
+BLECharacteristic* pCommandChar = nullptr;  // BLE write characteristic (command in)
+bool deviceConnected = false;               // Track if BLE client is connected
 
-// ========================== Command Lookup Table ==================================
+// ========================== Command Table & State ================================
 #define NUM_COMMANDS 9
 const char* COMMANDS[NUM_COMMANDS] = {
   "control power", "motor left", "motor right", "motor stop",
   "relay 1", "relay 2", "relay 3", "relay 4", "relay 5"
 };
-bool commandStates[NUM_COMMANDS] = {false}; // ON/OFF state for each command
+bool commandStates[NUM_COMMANDS] = {false}; // Track ON/OFF state for each command
 
-// ========================== Compass Sensor ========================================
+// ========================== Compass Sensor State =================================
 QMC5883LCompass compass;        // QMC5883L compass object
-float lastSentHeading = -999.0; // Store the last heading sent to BLE
+float lastSentHeading = -999.0; // Store last heading sent to BLE
 
-// ========================== Utility: Find command index by string =================
-// Returns the index of the command in COMMANDS array, or -1 if not found.
+// ================================================================================
+// Helper: Find command index by string, or return -1 if not found
+// ================================================================================
+// Used to translate a string command into an index (used for status and hardware)
 int getCommandIndex(const String& value) {
   for (int i = 0; i < NUM_COMMANDS; i++) {
     if (value == COMMANDS[i]) return i;
@@ -59,18 +60,18 @@ int getCommandIndex(const String& value) {
   return -1;
 }
 
-// ========================== Utility: Read Compass Heading =========================
-// Reads compass and returns heading in degrees (0-359), or -1 for error.
+// ================================================================================
+// Helper: Read compass heading, return degrees (0-359), or -1 for error
+// ================================================================================
+// This function will also print raw X/Y/Z for debugging purposes
 float getCurrentHeading() {
-  compass.read();
-  // Print raw sensor data for deep debugging:
+  compass.read();                         // Trigger compass measurement
   Serial.print("[Compass] Raw X: "); Serial.print(compass.getX());
   Serial.print(" Y: "); Serial.print(compass.getY());
   Serial.print(" Z: "); Serial.println(compass.getZ());
 
-  int heading = compass.getAzimuth();
-  Serial.print("[Compass] Raw Azimuth: ");
-  Serial.println(heading);
+  int heading = compass.getAzimuth();     // Get heading in degrees
+  Serial.print("[Compass] Raw Azimuth: "); Serial.println(heading);
   if (heading < 0 || heading > 359) {
     Serial.println("[Compass] ERROR: Heading out of range!");
     return -1;
@@ -78,9 +79,10 @@ float getCurrentHeading() {
   return (float)heading;
 }
 
-// ========================== Utility: Compose Full Status String ===================
-// Returns a string like: "heading: 163; control power on; motor left off; ..."
-// Always use this for notifications so Nextion always gets a full state snapshot.
+// ================================================================================
+// Helper: Compose full status string (heading + all command states)
+// ================================================================================
+// Returns string like: "heading: 163; control power on; motor left off; ..."
 String makeFullStatus(int heading) {
   String msg = "heading: " + String(heading);
   for (int i = 0; i < NUM_COMMANDS; ++i) {
@@ -91,8 +93,10 @@ String makeFullStatus(int heading) {
   return msg;
 }
 
-// ========================== BLE Server Connection Callbacks =======================
-// Handles device connection and disconnection events.
+// ================================================================================
+// BLE Server Callbacks: Connection management
+// ================================================================================
+// Handles when a BLE client connects or disconnects
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override {
     deviceConnected = true;
@@ -105,11 +109,13 @@ class MyServerCallbacks : public BLEServerCallbacks {
   }
 };
 
-// ========================== BLE Command Characteristic Callbacks ==================
-// Handles incoming write commands from BLE client (Nextion head unit).
+// ================================================================================
+// BLE Characteristic Callbacks: Command handling
+// ================================================================================
+// Handles BLE client writes ("motor left", "relay 1", etc)
 class CommandCharCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* pCharacteristic) override {
-    String value = pCharacteristic->getValue();
+    String value = pCharacteristic->getValue(); // Read written value
     Serial.print("[BLE] Command received: ");
     Serial.println(value);
 
@@ -121,16 +127,16 @@ class CommandCharCallbacks : public BLECharacteristicCallbacks {
       return;
     }
 
-    // Find which command was sent
+    // Find which command index matches this value
     int idx = getCommandIndex(value);
     if (idx >= 0) {
-      commandStates[idx] = !commandStates[idx]; // Toggle command state ON/OFF
+      commandStates[idx] = !commandStates[idx]; // Toggle state
       Serial.print("[BLE] Toggled command state: ");
       Serial.print(COMMANDS[idx]);
       Serial.print(" -> ");
       Serial.println(commandStates[idx] ? "ON" : "OFF");
 
-      // Set/clear the appropriate output pin for the hardware
+      // Physically set output pin HIGH/LOW for this command
       switch(idx) {
         case 0: digitalWrite(POWER_PIN, commandStates[idx]);
                 Serial.print("[HW] Set POWER_PIN to "); Serial.println(commandStates[idx]); break;
@@ -153,7 +159,7 @@ class CommandCharCallbacks : public BLECharacteristicCallbacks {
         default: Serial.println("[HW] ERROR: Unknown hardware index!"); break;
       }
 
-      // Always notify full state (heading + all command states)
+      // Always send full status snapshot (heading + all ON/OFF states)
       String notifyMsg = makeFullStatus((int)lastSentHeading); // Use last known heading for consistency
       Serial.print("[BLE] Sending full status notification: ");
       Serial.println(notifyMsg);
@@ -209,8 +215,8 @@ void setup() {
   Serial.println("[BLE] Initializing BLE stack...");
   BLEDevice::init("IC905_BLE_Server");
 
-  // Increase BLE MTU for longer notifications (optional, but recommended for full status strings)
-  BLEDevice::setMTU(100); // Increase if both server and client support it
+  // -------- Increase BLE MTU for longer notifications --------
+  BLEDevice::setMTU(100); // Increase notification size if both sides support it
 
   Serial.println("[BLE] Creating BLE server...");
   pServer = BLEDevice::createServer();
