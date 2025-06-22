@@ -128,7 +128,7 @@ void setup() {
   // --- COMPASS SENSOR INIT (HW-246 / QMC5883L) ---
   Wire.begin();           // Initialize I2C (SDA/SCL: 21/22 on ESP32 by default)
   compass.init();         // Initialize compass sensor
-  compass.setSmoothing(10); // Smoothing for stable readings (optional)
+  compass.setSmoothing(10, true); // Smoothing for stable readings (optional)
   Serial.println("[BLE] HW-246 Compass (QMC5883L) initialized.");
 
   // --- BLE INITIALIZATION ---
