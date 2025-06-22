@@ -9,13 +9,13 @@
 #include <Arduino.h>
 
 // I2C and Compass sensor libraries for the HW-246 (QMC5883L) compass.
-#include <Wire.h>
+
 #include <QMC5883LCompass.h>  // Library: https://github.com/keepworking/DFRobot_QMC5883
 
 // --- I2C PIN DEFINITIONS ---
 // Change these to set your preferred ESP32 I2C pins for the compass.
-#define I2C_SDA 21  // Example: GPIO18 for SDA
-#define I2C_SCL 22  // Example: GPIO19 for SCL
+#define I2C_SDA 21  // Example: GPIO21 for SDA
+#define I2C_SCL 22  // Example: GPIO22 for SCL
 
 // --- BLE SERVICE & CHARACTERISTIC UUIDs ---
 // These UUIDs uniquely identify your BLE service and characteristics.
