@@ -1,14 +1,16 @@
-// ==== IC-905 BLE SERVER with 8 BUTTONS/RELAYS & FLOATING-POINT HEADING ====
+// ==== IC-905 BLE SERVER with HW-246 (QMC5883L) COMPASS Support ====
 // ---- EXTREMELY GRANULAR COMMENTARY VERSION ----
 
-#include <BLEDevice.h>    // Core BLE functions
-#include <BLEServer.h>    // BLE server functionality
-#include <BLEUtils.h>     // BLE utility functions (UUIDs, etc.)
-#include <BLE2902.h>      // BLE descriptor (for notifications)
-#include <Arduino.h>      // Arduino core
+// --- INCLUDE REQUIRED LIBRARIES ---
+#include <BLEDevice.h>         // Core BLE functions
+#include <BLEServer.h>         // BLE server functionality
+#include <BLEUtils.h>          // BLE utility functions (UUIDs, etc.)
+#include <BLE2902.h>           // BLE descriptor (for notifications)
+#include <Arduino.h>           // Arduino core
+#include <QMC5883LCompass.h>   // QMC5883L compass library for HW-246
 
 // --- BLE SERVICE & CHARACTERISTIC UUIDs ---
-// (MUST match the client code!)
+// (MUST match the client code)
 #define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
 #define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1"
 #define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2"
@@ -39,37 +41,11 @@ const char* COMMANDS[NUM_COMMANDS] = {
 // Array to track ON/OFF state for each command: false = OFF, true = ON
 bool commandStates[NUM_COMMANDS] = {false};
 
-// =============================================================================
-// SECTION 1: COMPASS HEADING READING (SIMULATION, REPLACE WITH YOUR SENSOR)
-// =============================================================================
+// --- COMPASS OBJECT (QMC5883L/HW-246) ---
+QMC5883LCompass compass; // Create compass object
 
-// Simulate heading for demo; replace with real sensor code
-float getHeadingDegrees() {
-  // --- INSERT YOUR COMPASS SENSOR CODE BELOW ---
-  // For example, for QMC5883L:
-  //   compass.read();
-  //   float heading = compass.getAzimuth();
-  //   if (heading < 0) heading += 360.0;
-  //   heading = fmod(heading, 360.0);
-  //   return heading;
-  //
-  // --- DEMO: Simulate a heading that increases over time ---
-  static unsigned long lastMillis = 0;
-  static float heading = 0.0;
-  unsigned long now = millis();
-  if (now - lastMillis > 100) { // Increment every 100ms
-    heading += 1.7;             // Simulate turning
-    if (heading >= 360.0) heading -= 360.0;
-    lastMillis = now;
-  }
-  return heading;
-}
-
-// =============================================================================
-// SECTION 2: BLE UTILITY AND CALLBACKS
-// =============================================================================
-
-// --- Helper: Find Command Index from String ---
+// --- HELPER FUNCTION: Find Command Index ---
+// Returns the index for the given command string; -1 if not found
 int getCommandIndex(const String& value) {
   for (int i = 0; i < NUM_COMMANDS; i++) {
     if (value == COMMANDS[i]) return i;
@@ -126,14 +102,35 @@ class CommandCharCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
-// =============================================================================
-// SECTION 3: ARDUINO SETUP
-// =============================================================================
+// --- READ & FORMAT COMPASS HEADING ---
+// Returns heading as a string "xxx.x" degrees, always in range 0.0–359.9
+String getCompassHeadingString() {
+  compass.read(); // Update sensor values
+
+  // Get the azimuth (heading) in degrees, as a float
+  float heading = compass.getAzimuth();
+
+  // Normalize: ensure heading is positive and < 360.0
+  if (heading < 0.0) heading += 360.0;
+  heading = fmod(heading, 360.0);
+
+  // Format float to string with one decimal place (e.g., "273.8")
+  char headingStr[8];
+  dtostrf(heading, 5, 1, headingStr); // width=5, precision=1
+
+  // Remove leading spaces (dtostrf pads by default)
+  String cleanHeading = String(headingStr);
+  cleanHeading.trim();
+  return cleanHeading;
+}
 
 void setup() {
   // --- SERIAL DEBUGGING SETUP ---
   Serial.begin(115200);
   Serial.println("[BLE] Starting BLE Server...");
+
+  // --- INIT COMPASS SENSOR (HW-246/QMC5883L) ---
+  compass.init(); // Initialize QMC5883L hardware
 
   // --- BLE INITIALIZATION ---
   BLEDevice::init("IC905_BLE_Server");             // Set BLE device name
@@ -173,33 +170,21 @@ void setup() {
   Serial.println("[BLE] BLE server is now advertising!");
 }
 
-// =============================================================================
-// SECTION 4: ARDUINO MAIN LOOP
-// =============================================================================
-
 void loop() {
-  // --- PERIODIC STATUS NOTIFICATION (every 3 seconds when a client is connected) ---
+  // --- PERIODIC STATUS NOTIFICATION (every 3 seconds if a client is connected) ---
   static unsigned long lastNotify = 0;
   if (deviceConnected && millis() - lastNotify > 3000) {
     lastNotify = millis();
 
-    // --- READ COMPASS HEADING (FLOAT) ---
-    float heading = getHeadingDegrees();
-
-    // --- FORMAT HEADING TO 1 DECIMAL PLACE & NORMALIZE TO 0.0—359.9 ---
-    if (heading < 0.0) heading += 360.0;
-    heading = fmod(heading, 360.0); // Ensure 0.0 <= heading < 360.0
-
-    char headingStr[8];
-    dtostrf(heading, 5, 1, headingStr); // Format as "xxx.x"
+    // --- GET FORMATTED COMPASS HEADING (0.0–359.9° as string) ---
+    String headingStr = getCompassHeadingString();
 
     // --- BUILD STATUS STRING ---
-    // Format: "heading: 123.4; relay 1 on; relay 2 off; ..."
+    // Format: "heading: 273.8; relay 1 on; relay 2 off; ..."
     String msg = "heading: ";
     msg += headingStr;
-    msg.trim(); // Remove any extra spaces
 
-    // Append each relay/button state
+    // Append relay/button states
     for (int i = 0; i < NUM_COMMANDS; i++) {
       msg += "; ";
       msg += String(COMMANDS[i]) + (commandStates[i] ? " on" : " off");
@@ -216,12 +201,10 @@ void loop() {
   delay(100);
 }
 
-// =============================================================================
-// SECTION 5: NOTES FOR CUSTOMIZATION
-// =============================================================================
 /*
-  - Replace getHeadingDegrees() with your real compass sensor code.
-  - Status notifications now send heading as a float (e.g., "heading: 359.7").
-  - Client/Nextion must use floating-point parsing logic for heading.
-  - Add error handling or more commands as needed.
+  - This code reads the HW-246 (QMC5883L) compass every 3 seconds, formats the heading as "0.0–359.9" float, and sends it to the client.
+  - Requires the QMC5883LCompass library. Wire up SCL/SDA for I2C.
+  - The Nextion display should parse and show the heading as a float.
+  - Relay/button status messages are unchanged.
+  - All logic blocks are heavily commented for clarity.
 */
