@@ -1,88 +1,63 @@
-// ==== IC-905 BLE Server V2 ====
-// --- ESP32 BLE server for radio hardware control with relays, motors, power, and compass sensor ---
-// --- EXTREMELY GRANULAR COMMENTS AND DEBUG SERIAL OUTPUT VERSION ---
+#include <BLEDevice.h>         // Core BLE library
+#include <BLEServer.h>         // BLE server functionality
+#include <BLEUtils.h>          // BLE utilities
+#include <BLE2902.h>           // BLE client configuration descriptor
+#include <Arduino.h>           // Arduino core functions
+#include <QMC5883LCompass.h>   // Compass sensor library
 
-#include <BLEDevice.h>         // ESP32 BLE core library: Bluetooth Low Energy
-#include <BLEServer.h>         // BLE server for hosting GATT service
-#include <BLEUtils.h>          // BLE utility classes
-#include <BLE2902.h>           // For notification descriptor
-#include <Arduino.h>           // Arduino core
-#include <QMC5883LCompass.h>   // QMC5883L compass sensor library
+#define I2C_SDA 21             // I2C SDA pin on ESP32
+#define I2C_SCL 22             // I2C SCL pin on ESP32
 
-// ========================== I2C Pins for Compass Sensor ==========================
-#define I2C_SDA 21             // I2C data pin (connects to SDA on QMC5883L)
-#define I2C_SCL 22             // I2C clock pin (connects to SCL on QMC5883L)
+// OUTPUT PINS: Change these if your wiring is different!
+#define POWER_PIN       23
+#define MOTOR_LEFT_PIN  19
+#define MOTOR_RIGHT_PIN 18
+#define MOTOR_STOP_PIN   5
+#define RELAY1_PIN      12
+#define RELAY2_PIN      13
+#define RELAY3_PIN      14
+#define RELAY4_PIN      27
+#define RELAY5_PIN      26
 
-// ========================== Output Pin Definitions ===============================
-// ---- CHANGE THESE IF YOUR WIRING IS DIFFERENT! ----
-#define POWER_PIN       23     // GPIO for main power relay
-#define MOTOR_LEFT_PIN  19     // GPIO for motor left control
-#define MOTOR_RIGHT_PIN 18     // GPIO for motor right control
-#define MOTOR_STOP_PIN   5     // GPIO for motor stop control
-#define RELAY1_PIN      12     // GPIO for relay 1
-#define RELAY2_PIN      13     // GPIO for relay 2
-#define RELAY3_PIN      14     // GPIO for relay 3
-#define RELAY4_PIN      27     // GPIO for relay 4
-#define RELAY5_PIN      26     // GPIO for relay 5
-
-// ========================== BLE UUIDs (MUST MATCH CLIENT) ========================
 #define SERVICE_UUID      "12345678-1234-5678-1234-56789abcdef0"
 #define STATUS_CHAR_UUID  "12345678-1234-5678-1234-56789abcdef1"
 #define COMMAND_CHAR_UUID "12345678-1234-5678-1234-56789abcdef2"
 
-// ========================== BLE Server Global Pointers ===========================
-BLEServer* pServer = nullptr;               // BLE server object
-BLEService* pService = nullptr;             // BLE service object
-BLECharacteristic* pStatusChar = nullptr;   // BLE notify characteristic (status out)
-BLECharacteristic* pCommandChar = nullptr;  // BLE write characteristic (command in)
-bool deviceConnected = false;               // Track if BLE client is connected
+BLEServer* pServer = nullptr;
+BLEService* pService = nullptr;
+BLECharacteristic* pStatusChar = nullptr;
+BLECharacteristic* pCommandChar = nullptr;
+bool deviceConnected = false;
 
-// ========================== Command Table & State ================================
 #define NUM_COMMANDS 9
 const char* COMMANDS[NUM_COMMANDS] = {
   "control power", "motor left", "motor right", "motor stop",
   "relay 1", "relay 2", "relay 3", "relay 4", "relay 5"
 };
-bool commandStates[NUM_COMMANDS] = {false}; // Track ON/OFF state for each command
+bool commandStates[NUM_COMMANDS] = {false};
 
-// ========================== Compass Sensor State =================================
-QMC5883LCompass compass;        // QMC5883L compass object
-float lastSentHeading = -999.0; // Store last heading sent to BLE
+QMC5883LCompass compass;
+float lastSentHeading = -999.0;
 
-// ================================================================================
-// Helper: Find command index by string, or return -1 if not found
-// ================================================================================
-// Used to translate a string command into an index (used for status and hardware)
+// ================== Helper Functions ====================
+
+// Find command index by string, or return -1 if not found
 int getCommandIndex(const String& value) {
-  for (int i = 0; i < NUM_COMMANDS; i++) {
+  for (int i = 0; i < NUM_COMMANDS; i++)
     if (value == COMMANDS[i]) return i;
-  }
   return -1;
 }
 
-// ================================================================================
-// Helper: Read compass heading, return degrees (0-359), or -1 for error
-// ================================================================================
-// This function will also print raw X/Y/Z for debugging purposes
+// Read compass heading, return degrees (0-359), or -1 for error
 float getCurrentHeading() {
-  compass.read();                         // Trigger compass measurement
-  Serial.print("[Compass] Raw X: "); Serial.print(compass.getX());
-  Serial.print(" Y: "); Serial.print(compass.getY());
-  Serial.print(" Z: "); Serial.println(compass.getZ());
-
-  int heading = compass.getAzimuth();     // Get heading in degrees
-  Serial.print("[Compass] Raw Azimuth: "); Serial.println(heading);
-  if (heading < 0 || heading > 359) {
-    Serial.println("[Compass] ERROR: Heading out of range!");
+  compass.read();
+  int heading = compass.getAzimuth();
+  if (heading < 0 || heading > 359)
     return -1;
-  }
   return (float)heading;
 }
 
-// ================================================================================
-// Helper: Compose full status string (heading + all command states)
-// ================================================================================
-// Returns string like: "heading: 163; control power on; motor left off; ..."
+// Compose full status string with heading and all relay/motor/power states
 String makeFullStatus(int heading) {
   String msg = "heading: " + String(heading);
   for (int i = 0; i < NUM_COMMANDS; ++i) {
@@ -93,10 +68,9 @@ String makeFullStatus(int heading) {
   return msg;
 }
 
-// ================================================================================
-// BLE Server Callbacks: Connection management
-// ================================================================================
-// Handles when a BLE client connects or disconnects
+// ================== BLE Callbacks =======================
+
+// BLE server events: manage connection status
 class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override {
     deviceConnected = true;
@@ -109,17 +83,13 @@ class MyServerCallbacks : public BLEServerCallbacks {
   }
 };
 
-// ================================================================================
-// BLE Characteristic Callbacks: Command handling
-// ================================================================================
-// Handles BLE client writes ("motor left", "relay 1", etc)
+// BLE command characteristic events: handle client writes
 class CommandCharCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* pCharacteristic) override {
-    String value = pCharacteristic->getValue(); // Read written value
+    String value = pCharacteristic->getValue();
     Serial.print("[BLE] Command received: ");
     Serial.println(value);
 
-    // Special case: respond to PING for client heartbeat
     if (value == "PING") {
       Serial.println("[BLE] Received PING, sending PONG.");
       pStatusChar->setValue("PONG");
@@ -127,40 +97,28 @@ class CommandCharCallbacks : public BLECharacteristicCallbacks {
       return;
     }
 
-    // Find which command index matches this value
     int idx = getCommandIndex(value);
     if (idx >= 0) {
-      commandStates[idx] = !commandStates[idx]; // Toggle state
+      commandStates[idx] = !commandStates[idx];
       Serial.print("[BLE] Toggled command state: ");
-      Serial.print(COMMANDS[idx]);
-      Serial.print(" -> ");
+      Serial.print(COMMANDS[idx]); Serial.print(" -> ");
       Serial.println(commandStates[idx] ? "ON" : "OFF");
 
-      // Physically set output pin HIGH/LOW for this command
+      // Set output pin for hardware
       switch(idx) {
-        case 0: digitalWrite(POWER_PIN, commandStates[idx]);
-                Serial.print("[HW] Set POWER_PIN to "); Serial.println(commandStates[idx]); break;
-        case 1: digitalWrite(MOTOR_LEFT_PIN, commandStates[idx]);
-                Serial.print("[HW] Set MOTOR_LEFT_PIN to "); Serial.println(commandStates[idx]); break;
-        case 2: digitalWrite(MOTOR_RIGHT_PIN, commandStates[idx]);
-                Serial.print("[HW] Set MOTOR_RIGHT_PIN to "); Serial.println(commandStates[idx]); break;
-        case 3: digitalWrite(MOTOR_STOP_PIN, commandStates[idx]);
-                Serial.print("[HW] Set MOTOR_STOP_PIN to "); Serial.println(commandStates[idx]); break;
-        case 4: digitalWrite(RELAY1_PIN, commandStates[idx]);
-                Serial.print("[HW] Set RELAY1_PIN to "); Serial.println(commandStates[idx]); break;
-        case 5: digitalWrite(RELAY2_PIN, commandStates[idx]);
-                Serial.print("[HW] Set RELAY2_PIN to "); Serial.println(commandStates[idx]); break;
-        case 6: digitalWrite(RELAY3_PIN, commandStates[idx]);
-                Serial.print("[HW] Set RELAY3_PIN to "); Serial.println(commandStates[idx]); break;
-        case 7: digitalWrite(RELAY4_PIN, commandStates[idx]);
-                Serial.print("[HW] Set RELAY4_PIN to "); Serial.println(commandStates[idx]); break;
-        case 8: digitalWrite(RELAY5_PIN, commandStates[idx]);
-                Serial.print("[HW] Set RELAY5_PIN to "); Serial.println(commandStates[idx]); break;
-        default: Serial.println("[HW] ERROR: Unknown hardware index!"); break;
+        case 0: digitalWrite(POWER_PIN,       commandStates[idx]); break;
+        case 1: digitalWrite(MOTOR_LEFT_PIN,  commandStates[idx]); break;
+        case 2: digitalWrite(MOTOR_RIGHT_PIN, commandStates[idx]); break;
+        case 3: digitalWrite(MOTOR_STOP_PIN,  commandStates[idx]); break;
+        case 4: digitalWrite(RELAY1_PIN,      commandStates[idx]); break;
+        case 5: digitalWrite(RELAY2_PIN,      commandStates[idx]); break;
+        case 6: digitalWrite(RELAY3_PIN,      commandStates[idx]); break;
+        case 7: digitalWrite(RELAY4_PIN,      commandStates[idx]); break;
+        case 8: digitalWrite(RELAY5_PIN,      commandStates[idx]); break;
       }
 
-      // Always send full status snapshot (heading + all ON/OFF states)
-      String notifyMsg = makeFullStatus((int)lastSentHeading); // Use last known heading for consistency
+      // Always send full status snapshot
+      String notifyMsg = makeFullStatus((int)lastSentHeading);
       Serial.print("[BLE] Sending full status notification: ");
       Serial.println(notifyMsg);
       pStatusChar->setValue(notifyMsg.c_str());
@@ -171,15 +129,13 @@ class CommandCharCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
+// ================== SETUP and LOOP =====================
+
 void setup() {
-  // -------- Serial Debug Setup --------
   Serial.begin(115200);
-  while (!Serial); // Wait for serial port if required
-  Serial.println();
   Serial.println("=== IC-905 BLE Server V2 STARTUP ===");
 
-  // -------- Output Pin Setup --------
-  Serial.println("[HW] Initializing output pins (relays, motors, power) ...");
+  // Setup output pins
   pinMode(POWER_PIN, OUTPUT);
   pinMode(MOTOR_LEFT_PIN, OUTPUT);
   pinMode(MOTOR_RIGHT_PIN, OUTPUT);
@@ -190,7 +146,7 @@ void setup() {
   pinMode(RELAY4_PIN, OUTPUT);
   pinMode(RELAY5_PIN, OUTPUT);
 
-  // Set all outputs LOW at startup for safety
+  // Set all outputs LOW at startup
   digitalWrite(POWER_PIN, LOW);
   digitalWrite(MOTOR_LEFT_PIN, LOW);
   digitalWrite(MOTOR_RIGHT_PIN, LOW);
@@ -200,49 +156,37 @@ void setup() {
   digitalWrite(RELAY3_PIN, LOW);
   digitalWrite(RELAY4_PIN, LOW);
   digitalWrite(RELAY5_PIN, LOW);
-  Serial.println("[HW] All outputs LOW (OFF) at startup.");
 
-  // -------- I2C and Compass Setup --------
-  Serial.print("[I2C] Initializing on SDA="); Serial.print(I2C_SDA); Serial.print(", SCL="); Serial.println(I2C_SCL);
+  // Setup I2C and compass
   Wire.begin(I2C_SDA, I2C_SCL);
-  delay(100); // Give I2C devices time to power up
-  Serial.println("[Compass] Initializing QMC5883L...");
+  delay(100);
   compass.init();
-  delay(100); // Give time for compass startup
-  Serial.println("[Compass] QMC5883L initialized.");
+  delay(100);
 
-  // -------- BLE Setup --------
-  Serial.println("[BLE] Initializing BLE stack...");
+  // BLE Setup
   BLEDevice::init("IC905_BLE_Server");
+  BLEDevice::setMTU(100); // Increase if both server and client support it
 
-  // -------- Increase BLE MTU for longer notifications --------
-  BLEDevice::setMTU(100); // Increase notification size if both sides support it
-
-  Serial.println("[BLE] Creating BLE server...");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-  Serial.print("[BLE] Creating BLE service (UUID: "); Serial.print(SERVICE_UUID); Serial.println(")...");
   pService = pServer->createService(SERVICE_UUID);
 
-  Serial.print("[BLE] Creating status notify characteristic (UUID: "); Serial.print(STATUS_CHAR_UUID); Serial.println(")...");
-  pStatusChar = pService->createCharacteristic(STATUS_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  pStatusChar = pService->createCharacteristic(
+    STATUS_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
   pStatusChar->addDescriptor(new BLE2902());
   pStatusChar->setValue("READY");
 
-  Serial.print("[BLE] Creating command write characteristic (UUID: "); Serial.print(COMMAND_CHAR_UUID); Serial.println(")...");
-  pCommandChar = pService->createCharacteristic(COMMAND_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
+  pCommandChar = pService->createCharacteristic(
+    COMMAND_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
   pCommandChar->setCallbacks(new CommandCharCallbacks());
 
-  Serial.println("[BLE] Starting BLE service...");
   pService->start();
 
-  Serial.println("[BLE] Starting advertising...");
   BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
   BLEDevice::startAdvertising();
-  Serial.println("[BLE] BLE advertising started.");
 
   Serial.println("=== IC-905 BLE Server READY ===");
 }
@@ -250,26 +194,18 @@ void setup() {
 void loop() {
   static unsigned long lastHeadingNotify = 0;
 
-  // -------- Periodically send compass heading to BLE client if connected --------
+  // Every 3 seconds, send full status (heading + all states)
   if (deviceConnected && millis() - lastHeadingNotify > 3000) {
     lastHeadingNotify = millis();
-    Serial.println("[MainLoop] Attempting to read compass heading...");
     float heading = getCurrentHeading();
     if (heading >= 0 && abs(heading - lastSentHeading) >= 1.0) {
       String notifyMsg = makeFullStatus((int)heading);
       Serial.print("[MainLoop] Sending full status notification: ");
       Serial.println(notifyMsg);
-      Serial.print("[MainLoop] Notification length: ");
-      Serial.println(notifyMsg.length());
       pStatusChar->setValue(notifyMsg.c_str());
       pStatusChar->notify();
       lastSentHeading = heading;
-    } else if (heading < 0) {
-      Serial.println("[MainLoop] ERROR: Invalid compass heading, not notifying.");
-    } else {
-      Serial.println("[MainLoop] Heading unchanged, no notification sent.");
     }
   }
-
-  delay(20); // Short delay for stability and to yield to system
+  delay(20);
 }
