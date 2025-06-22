@@ -14,8 +14,8 @@
 
 // --- I2C PIN DEFINITIONS ---
 // Change these to set your preferred ESP32 I2C pins for the compass.
-#define I2C_SDA 18  // Example: GPIO18 for SDA
-#define I2C_SCL 19  // Example: GPIO19 for SCL
+#define I2C_SDA 21  // Example: GPIO18 for SDA
+#define I2C_SCL 22  // Example: GPIO19 for SCL
 
 // --- BLE SERVICE & CHARACTERISTIC UUIDs ---
 // These UUIDs uniquely identify your BLE service and characteristics.
