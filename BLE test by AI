@@ -1,0 +1,149 @@
+// ==== IC-905 BLE Server for Nextion BLE Head Unit ====
+// ---- Uses HW-241 (QMC5883L-compatible) compass ----
+// ---- Sends full status string (heading + all states) every 3s and after each command ----
+// ---- EXTREMELY GRANULAR COMMENTARY VERSION ----
+
+#include <BLEDevice.h>         // Core BLE library for ESP32
+#include <BLEServer.h>         // BLE server functionality
+#include <BLEUtils.h>          // BLE utility helpers
+#include <BLE2902.h>           // BLE2902 descriptor for notify/indicate settings
+#include <Wire.h>              // I2C library for compass
+#include <QMC5883LCompass.h>   // QMC5883L (HW-241) compass library
+#include <Arduino.h>           // Arduino core functions
+
+// ==== Pin Definitions for ESP32 hardware ====
+#define I2C_SDA 21             // I2C SDA pin (HW-241 default for ESP32)
+#define I2C_SCL 22             // I2C SCL pin
+
+// ==== BLE UUID Definitions (must match Nextion client) ====
+#define SERVICE_UUID      "12345678-1234-5678-1234-56789abcdef0"
+#define STATUS_CHAR_UUID  "12345678-1234-5678-1234-56789abcdef1"
+#define COMMAND_CHAR_UUID "12345678-1234-5678-1234-56789abcdef2"
+
+// ==== BLE Global State ====
+BLEServer* pServer = nullptr;             // BLE server instance pointer
+BLEService* pService = nullptr;           // Main BLE service pointer
+BLECharacteristic* pStatusChar = nullptr; // Notify characteristic pointer (server->client)
+BLECharacteristic* pCommandChar = nullptr;// Write characteristic pointer (client->server)
+bool deviceConnected = false;             // True when a BLE client is connected
+
+// ==== Command Definitions ====
+#define NUM_COMMANDS 9
+const char* COMMANDS[NUM_COMMANDS] = {    // List of all toggles/statuses
+  "control power", "motor left", "motor right", "motor stop",
+  "relay 1", "relay 2", "relay 3", "relay 4", "relay 5"
+};
+bool commandStates[NUM_COMMANDS] = {false}; // ON/OFF status for each command
+
+// ==== HW-241 Compass ====
+QMC5883LCompass compass;                  // QMC5883L compass object (HW-241)
+float lastSentHeading = -999.0;           // Track last heading sent
+
+// ==== Helper: Find command index by string name ====
+int getCommandIndex(const String& value) {
+  for (int i = 0; i < NUM_COMMANDS; i++) {
+    if (value == COMMANDS[i]) return i;
+  }
+  return -1; // Not found
+}
+
+// ==== Helper: Read HW-241 compass, return heading degrees 0-359 or -1 for error ====
+float getCurrentHeading() {
+  compass.read();                         // Trigger measurement
+  int heading = compass.getAzimuth();     // Get heading in degrees
+  if (heading < 0 || heading > 359)       // Out of range = error
+    return -1;
+  return (float)heading;
+}
+
+// ==== Helper: Build full status string ====
+// Format: "heading: XXX; control power on/off; ...; relay 5 on/off;"
+String buildFullStatusString(float heading) {
+  String status = "heading: " + String((int)heading) + "; ";
+  for (int i = 0; i < NUM_COMMANDS; i++) {
+    status += String(COMMANDS[i]) + (commandStates[i] ? " on; " : " off; ");
+  }
+  return status;
+}
+
+// ==== BLE Server Callbacks: Connection Management ====
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer*) override {
+    deviceConnected = true;               // Set flag on connection
+  }
+  void onDisconnect(BLEServer*) override {
+    deviceConnected = false;              // Clear flag on disconnect
+    BLEDevice::getAdvertising()->start(); // Restart advertising
+  }
+};
+
+// ==== BLE Write Characteristic Callbacks: Command handler ====
+class CommandCharCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* pCharacteristic) override {
+    String value = pCharacteristic->getValue(); // Get data from client
+    if (value == "PING") {                      // Special case: client ping
+      pStatusChar->setValue("PONG");
+      pStatusChar->notify();
+      return;
+    }
+    int idx = getCommandIndex(value);           // Find command index
+    if (idx >= 0) {                            // Valid command
+      commandStates[idx] = !commandStates[idx]; // Toggle ON/OFF
+      float heading = getCurrentHeading();      // Read heading for full update
+      String fullStatus = buildFullStatusString(heading);
+      pStatusChar->setValue(fullStatus.c_str()); // Notify client with full status
+      pStatusChar->notify();
+    }
+    // Ignore unknown commands
+  }
+};
+
+void setup() {
+  Serial.begin(115200);                    // Serial for debugging
+  Wire.begin(I2C_SDA, I2C_SCL);            // Start I2C for compass
+  compass.init();                          // Initialize HW-241 compass
+
+  BLEDevice::init("IC905_BLE_Server");     // Set BLE name for ESP32
+  pServer = BLEDevice::createServer();     // Create BLE server instance
+  pServer->setCallbacks(new MyServerCallbacks()); // Connect/disconnect callbacks
+
+  pService = pServer->createService(SERVICE_UUID); // Main BLE service
+
+  // ---- Notify characteristic: server-to-client status messages ----
+  pStatusChar = pService->createCharacteristic(
+    STATUS_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  pStatusChar->addDescriptor(new BLE2902()); // Enable NOTIFY descriptor
+  pStatusChar->setValue("READY");            // Initial status
+
+  // ---- Write characteristic: client-to-server commands ----
+  pCommandChar = pService->createCharacteristic(
+    COMMAND_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
+  pCommandChar->setCallbacks(new CommandCharCallbacks()); // Set command handler
+
+  pService->start();                             // Start BLE service
+
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising(); // Get advertising object
+  pAdvertising->addServiceUUID(SERVICE_UUID);    // Advertise our service UUID
+  pAdvertising->setScanResponse(true);           // Enable scan responses
+  BLEDevice::startAdvertising();                 // Start BLE advertising
+}
+
+// ==== Main Loop: Send full status every 3 seconds if connected ====
+void loop() {
+  static unsigned long lastStatusNotify = 0;     // Last notification time
+
+  // Every 3 seconds, send full status if connected and heading changed >=1 deg
+  if (deviceConnected && millis() - lastStatusNotify > 3000) {
+    lastStatusNotify = millis();
+    float heading = getCurrentHeading();
+    if (heading >= 0 && abs(heading - lastSentHeading) >= 1.0) {
+      String fullStatus = buildFullStatusString(heading); // Build status string
+      pStatusChar->setValue(fullStatus.c_str()); // Set notification value
+      pStatusChar->notify();                     // Send to client(s)
+      lastSentHeading = heading;                 // Update last sent heading
+      Serial.print("[MainLoop] Sending full status notification: ");
+      Serial.println(fullStatus);
+    }
+  }
+  delay(20); // Small delay for stability
+}
