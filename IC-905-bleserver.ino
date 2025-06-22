@@ -24,11 +24,12 @@ bool deviceConnected = false;           // True = client connected, false = not 
 
 // --- COMMANDS AND STATE TRACKING ---
 // List of supported commands/buttons (must match client exactly)
-#define NUM_COMMANDS 8
+#define NUM_COMMANDS 9
 const char* COMMANDS[NUM_COMMANDS] = {
   "control power",    // Button 1
   "motor left",       // Button 2
   "motor right",      // Button 3
+  "motor stop",       // Button 33 (NEW)
   "relay 1",          // Button 4
   "relay 2",          // Button 5
   "relay 3",          // Button 6
