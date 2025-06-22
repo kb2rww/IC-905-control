@@ -1,18 +1,19 @@
-// ==== IC-905 BLE SERVER with HW-246 Compass Support and Granular Comments ====
+// ==== IC-905 BLE SERVER with HW-246 Compass (QMC5883L) Support ====
 
 // --- INCLUDE REQUIRED LIBRARIES ---
-// BLE and core Arduino libraries
+// BLE libraries for ESP32
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <Arduino.h>
-// I2C and Compass sensor support for HW-246 (usually QMC5883L!)
+
+// I2C and Compass sensor libraries for HW-246 (QMC5883L)
 #include <Wire.h>
-#include <QMC5883LCompass.h>  // Use QMC5883LCompass library for HW-246
+#include <QMC5883LCompass.h>  // Install: https://github.com/keepworking/DFRobot_QMC5883
 
 // --- BLE SERVICE & CHARACTERISTIC UUIDs ---
-// (MUST match the client code)
+// These MUST match your client code!
 #define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
 #define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1"
 #define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2"
@@ -27,6 +28,7 @@ BLECharacteristic* pCommandChar = nullptr;  // Characteristic for client->server
 bool deviceConnected = false;           // True = client connected, false = not connected
 
 // --- COMMANDS AND STATE TRACKING ---
+// List of supported commands/buttons (MUST match client exactly)
 #define NUM_COMMANDS 9
 const char* COMMANDS[NUM_COMMANDS] = {
   "control power",    // 0
@@ -58,9 +60,8 @@ int getCommandIndex(const String& value) {
 // --- FUNCTION: Get Current Heading from Compass Sensor ---
 // Returns heading in degrees (0-359), or -1 if sensor error
 float getCurrentHeading() {
-  compass.read();  // Update sensor data
-  // getAzimuth() returns 0-359 degrees
-  int heading = compass.getAzimuth();
+  compass.read();  // Update sensor data from hardware
+  int heading = compass.getAzimuth(); // getAzimuth() returns 0-359 degrees
   if (heading < 0 || heading > 359) return -1; // Out of range? (shouldn't happen)
   return (float)heading;
 }
@@ -128,7 +129,7 @@ void setup() {
   // --- COMPASS SENSOR INIT (HW-246 / QMC5883L) ---
   Wire.begin();           // Initialize I2C (SDA/SCL: 21/22 on ESP32 by default)
   compass.init();         // Initialize compass sensor
-  compass.setSmoothing(10, true); // Smoothing for stable readings (optional)
+  compass.setSmoothing(10, false); // Smoothing for stable readings (optional)
   Serial.println("[BLE] HW-246 Compass (QMC5883L) initialized.");
 
   // --- BLE INITIALIZATION ---
