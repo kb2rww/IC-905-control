@@ -47,10 +47,18 @@ bool connectToServer() {
 String mapNextionToBLE(const String& cmd) {
   if (cmd == "MF") return "motor right";
   if (cmd == "MR") return "motor left";
-  //if (cmd == "MS") return "control power";
   if (cmd == "144ON") return "relay 1";
   if (cmd == "144OFF") return "relay 1";
   if (cmd == "MS") return "motor stop";
+  if (cmd == "440OFF") return "relay 2";
+  if (cmd == "440ON") return "relay 2";
+  if (cmd == "1296OFF") return "relay 3";
+  if (cmd == "1296ON") return "relay 3";
+  if (cmd == "2304OFF") return "relay 4";
+  if (cmd == "2304ON") return "relay 4";
+  if (cmd == "5760OFF") return "relay 5";
+  if (cmd == "5760ON") return "relay 5";
+  if (cmd == "CP") return "control power";
   // Add more as needed
   return "";
 }
