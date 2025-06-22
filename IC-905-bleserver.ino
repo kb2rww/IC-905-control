@@ -176,7 +176,7 @@ void loop() {
   if (deviceConnected && millis() - lastHeadingNotify > 3000) { // Every 3 seconds
     lastHeadingNotify = millis();
 
-    float heading = getCurrentHeading(); // Get latest heading from compass
+    /*float heading = getCurrentHeading(); // Get latest heading from compass
     if (heading >= 0 && abs(heading - lastSentHeading) >= 1.0) { // Only send if changed by 1 degree or more
       String headingMsg = "heading: " + String(heading, 1); // 1 decimal place
       pStatusChar->setValue(headingMsg.c_str());
@@ -184,6 +184,15 @@ void loop() {
       lastSentHeading = heading;
       Serial.print("[BLE] Compass notified: ");
       Serial.println(headingMsg);
+    }*/
+    float heading = getCurrentHeading(); // Get latest heading from compass
+  if (heading >= 0 && abs(heading - lastSentHeading) >= 1.0) { // Only send if changed by 1 degree or more
+    String headingMsg = "heading: " + String((int)heading); // No decimal point
+    pStatusChar->setValue(headingMsg.c_str());
+    pStatusChar->notify();
+    lastSentHeading = heading;
+    Serial.print("[BLE] Compass notified: ");
+    Serial.println(headingMsg);
     }
   }
 
