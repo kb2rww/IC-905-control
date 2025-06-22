@@ -175,17 +175,17 @@ void setup() {
 }
 
 void loop() {
-  // --- PERIODIC HEADING (COMPASS) NOTIFICATION ---
-  static unsigned long lastHeadingNotify = 0;   // Timestamp of last compass notification
-  // Send heading every 3 seconds if connected
-  if (deviceConnected && millis() - lastHeadingNotify > 3000) {
+  static unsigned long lastHeadingNotify = 0;
+  static float prevHeading = -999.0;
+  static unsigned long lastCompassChange = 0;
+
+  if (deviceConnected && millis() - lastHeadingNotify > 3000) { // Every 3 seconds
     lastHeadingNotify = millis();
 
-    float heading = getCurrentHeading();    // Get latest heading from compass sensor
+    float heading = getCurrentHeading(); // Get latest heading from compass
+    Serial.print("[DEBUG] Raw heading: "); Serial.println(heading);
 
-    // Only notify if heading is valid and has changed by at least 1 degree
     if (heading >= 0 && abs(heading - lastSentHeading) >= 1.0) {
-      // Convert heading to integer (no decimal)
       String headingMsg = "heading: " + String((int)heading);
       pStatusChar->setValue(headingMsg.c_str());
       pStatusChar->notify();
@@ -193,10 +193,21 @@ void loop() {
       Serial.print("[BLE] Compass notified: ");
       Serial.println(headingMsg);
     }
+
+    // Detect heading freeze (no change for 15s or sensor error)
+    if (heading != prevHeading && heading >= 0) {
+      lastCompassChange = millis();
+      prevHeading = heading;
+    } else if (millis() - lastCompassChange > 15000 || heading < 0) {
+      // Sensor stuck or invalid, try to re-init
+      Serial.println("[ERROR] Compass freeze detected or invalid reading. Reinitializing sensor...");
+      compass.init();
+      compass.setSmoothing(10, false);
+      lastCompassChange = millis();
+    }
   }
 
   // --- STATE CHANGE NOTIFICATIONS FOR EACH COMMAND ---
-  // For each command, only send notification if state changed since last notification
   for (int i = 0; i < NUM_COMMANDS; i++) {
     String currentStatus = String(COMMANDS[i]) + (commandStates[i] ? " on" : " off");
     if (currentStatus != lastSentStatus[i]) {
@@ -208,5 +219,5 @@ void loop() {
     }
   }
 
-  delay(20); // Short delay to reduce CPU usage (adjust as needed)
+  delay(20);
 }
