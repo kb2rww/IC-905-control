@@ -1,0 +1,121 @@
+#include <BLEDevice.h>         // Core BLE library
+#include <BLEServer.h>         // BLE server functionality
+#include <BLEUtils.h>          // BLE utilities
+#include <BLE2902.h>           // BLE client configuration descriptor
+#include <Arduino.h>           // Arduino core functions
+#include <QMC5883LCompass.h>   // Compass sensor library
+
+#define I2C_SDA 21             // I2C SDA pin on ESP32
+#define I2C_SCL 22             // I2C SCL pin on ESP32
+
+#define SERVICE_UUID      "12345678-1234-5678-1234-56789abcdef0" // BLE service identifier
+#define STATUS_CHAR_UUID  "12345678-1234-5678-1234-56789abcdef1" // BLE notify characteristic UUID
+#define COMMAND_CHAR_UUID "12345678-1234-5678-1234-56789abcdef2" // BLE write characteristic UUID
+
+BLEServer* pServer = nullptr;             // Pointer to BLE server
+BLEService* pService = nullptr;           // Pointer to BLE service
+BLECharacteristic* pStatusChar = nullptr; // Notify-only characteristic (server->client)
+BLECharacteristic* pCommandChar = nullptr;// Write-only characteristic (client->server)
+bool deviceConnected = false;             // Connection flag
+
+#define NUM_COMMANDS 9
+const char* COMMANDS[NUM_COMMANDS] = {    // List of supported commands
+  "control power", "motor left", "motor right", "motor stop",
+  "relay 1", "relay 2", "relay 3", "relay 4", "relay 5"
+};
+bool commandStates[NUM_COMMANDS] = {false}; // Each command ON/OFF state
+
+QMC5883LCompass compass;                  // Compass sensor object
+float lastSentHeading = -999.0;           // Last sent heading value
+
+// Find command index by string, or return -1 if not found
+int getCommandIndex(const String& value) {
+  for (int i = 0; i < NUM_COMMANDS; i++) {
+    if (value == COMMANDS[i]) return i;
+  }
+  return -1;
+}
+
+// Read compass heading, return degrees (0-359), or -1 for error
+float getCurrentHeading() {
+  compass.read();                         // Trigger compass measurement
+  int heading = compass.getAzimuth();     // Get heading in degrees
+  if (heading < 0 || heading > 359)       // Check for error
+    return -1;
+  return (float)heading;
+}
+
+// BLE server events: manage connection status
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer*) override { deviceConnected = true; }
+  void onDisconnect(BLEServer*) override {
+    deviceConnected = false;
+    BLEDevice::getAdvertising()->start(); // Re-enable advertising
+  }
+};
+
+// BLE command characteristic events: handle client writes
+class CommandCharCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* pCharacteristic) override {
+    String value = pCharacteristic->getValue(); // Get client command
+    if (value == "PING") {                      // Special ping-pong
+      pStatusChar->setValue("PONG");
+      pStatusChar->notify();
+      return;
+    }
+    int idx = getCommandIndex(value);           // Find command index
+    if (idx >= 0) {                            // If valid command
+      commandStates[idx] = !commandStates[idx]; // Toggle ON/OFF state
+      String notifyMsg = String(COMMANDS[idx]) + (commandStates[idx] ? " on" : " off");
+      pStatusChar->setValue(notifyMsg.c_str()); // Prepare feedback
+      pStatusChar->notify();                    // Send to client
+    }
+  }
+};
+
+void setup() {
+  Serial.begin(115200);                    // Start serial for debug
+  Wire.begin(I2C_SDA, I2C_SCL);            // Setup I2C on SDA/SCL
+  compass.init();                          // Initialize compass sensor
+  BLEDevice::init("IC905_BLE_Server");     // Set BLE device name
+
+  pServer = BLEDevice::createServer();     // Create BLE server object
+  pServer->setCallbacks(new MyServerCallbacks()); // Set server callbacks
+
+  pService = pServer->createService(SERVICE_UUID); // Create main BLE service
+
+  // Create notify characteristic for server->client messages
+  pStatusChar = pService->createCharacteristic(
+    STATUS_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  pStatusChar->addDescriptor(new BLE2902()); // Enable notifications
+  pStatusChar->setValue("READY");            // Initial value
+
+  // Create write characteristic for client->server commands
+  pCommandChar = pService->createCharacteristic(
+    COMMAND_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
+  pCommandChar->setCallbacks(new CommandCharCallbacks()); // Set command handler
+
+  pService->start();                             // Start BLE service
+
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising(); // Get advertising object
+  pAdvertising->addServiceUUID(SERVICE_UUID);    // Advertise our service
+  pAdvertising->setScanResponse(true);           // Enable scan responses
+  BLEDevice::startAdvertising();                 // Start BLE advertising
+}
+
+void loop() {
+  static unsigned long lastHeadingNotify = 0;    // Time of last heading sent
+
+  // Every 3 seconds, if connected, send compass heading
+  if (deviceConnected && millis() - lastHeadingNotify > 3000) {
+    lastHeadingNotify = millis();                // Update last notify time
+    float heading = getCurrentHeading();         // Get compass value
+    if (heading >= 0 && abs(heading - lastSentHeading) >= 1.0) {
+      String headingMsg = "heading: " + String((int)heading); // Format message
+      pStatusChar->setValue(headingMsg.c_str()); // Prepare BLE message
+      pStatusChar->notify();                     // Send to client
+      lastSentHeading = heading;                 // Store last sent value
+    }
+  }
+  delay(20);                                    // Yield to system
+}
