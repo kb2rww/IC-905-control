@@ -1,82 +1,108 @@
-// Nextion NX4827P043-011R control display for IC-905 mobil controler.
-// this will remot control the rotor, asmith, read compass direction and control altenna relays/amplifiers.
-
-//#include <SoftwareSerial.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
+#include <HardwareSerial.h>
 
-// --- BLE SERVICE AND CHARACTERISTIC UUIDS ---
-// These must match the server's UUIDs
-#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0" // Main BLE service
-#define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1" // Notification char (server->client)
-#define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2" // Write char (client->server)
-
-// --- BLE CLIENT STATE VARIABLES ---
-static boolean doConnect = false;                  // Set true when we find our server during scan
-static BLEAdvertisedDevice* myDevice = nullptr;    // Holds info on discovered BLE server
-BLEClient* pClient = nullptr;                      // BLE Client connection object
-BLERemoteCharacteristic* pStatusCharacteristic = nullptr;  // For notifications from server
-BLERemoteCharacteristic* pCommandCharacteristic = nullptr; // For sending commands to server
-// Nextion com pin setup
 #define TXD2 17
 #define RXD2 16
-//SoftwareSerial mySerial =  SoftwareSerial(rxPin, txPin);
-HardwareSerial mySerial(2);
-int counter = 0;
+HardwareSerial nextion(2);
 
-void setup()  {
- // Define pin modes for TX and RX  
- Serial.begin(115200);
- mySerial.begin(115200, SERIAL_8N1, RXD2, TXD2);  // UART setup
- Serial.println("hello");
- 
-  // --- BLE SCAN INITIALIZATION ---
-   BLEDevice::init("");                       // Initialize BLE stack (no client name needed)
-   BLEScan* pBLEScan = BLEDevice::getScan();  // Create BLE scan object
-   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-   pBLEScan->setActiveScan(true);             // More detailed advertising packets
-   pBLEScan->start(30, false);                // Start scan (max 30 seconds, non-blocking)
+// BLE UUIDs (must match server)
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
+#define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1"
+#define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2"
+
+// BLE variables
+static boolean doConnect = false;
+static BLEAdvertisedDevice* myDevice = nullptr;
+BLEClient* pClient = nullptr;
+BLERemoteCharacteristic* pCommandCharacteristic = nullptr;
+bool connected = false;
+
+// BLE scan callback
+class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice advertisedDevice) {
+    if (advertisedDevice.haveServiceUUID() && advertisedDevice.getServiceUUID().toString() == SERVICE_UUID) {
+      myDevice = new BLEAdvertisedDevice(advertisedDevice);
+      doConnect = true;
+      BLEDevice::getScan()->stop();
+    }
+  }
+};
+
+// Connect to BLE server and get characteristic
+bool connectToServer() {
+  pClient = BLEDevice::createClient();
+  if (!pClient->connect(myDevice)) return false;
+  BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
+  if (!pRemoteService) return false;
+  pCommandCharacteristic = pRemoteService->getCharacteristic(COMMAND_CHAR_UUID);
+  if (!pCommandCharacteristic) return false;
+  connected = true;
+  return true;
+}
+
+// Map Nextion ASCII text to BLE commands
+String mapNextionToBLE(const String& cmd) {
+  if (cmd == "MF") return "motor right";
+  if (cmd == "MR") return "motor left";
+  //if (cmd == "MS") return "control power";
+  if (cmd == "144ON") return "relay 1";
+  if (cmd == "144OFF") return "relay 1";
+  if (cmd == "MS") return "motor stop";
+  // Add more as needed
+  return "";
+}
+
+// Send mapped command to BLE server
+void sendBLECommand(const String& mappedCmd) {
+  if (connected && pCommandCharacteristic) {
+    pCommandCharacteristic->writeValue(mappedCmd.c_str(), mappedCmd.length());
+    Serial.print("Sent BLE: "); Serial.println(mappedCmd);
+  } else {
+    Serial.println("Not connected! Could not send BLE command.");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  nextion.begin(115200, SERIAL_8N1, RXD2, TXD2);
+  BLEDevice::init("");
+  BLEScan* pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true);
+  pBLEScan->start(30, false);
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-if(mySerial.available()){
-   String data_from_display="";
-   delay(30);
-   while(mySerial.available()) {
-     data_from_display += char(mySerial.read());
-   }
-   Serial.println (data_from_display);
-   sendData (data_from_display);
-  }
-
-  // --- BLE CONNECTION LOGIC: Connect after scan, get characteristics, register notify ---
   if (doConnect && myDevice != nullptr) {
-    doConnect = false;                          // Prevent repeated attempts
-    Serial.println("Connecting to BLE server...");
-    pClient = BLEDevice::createClient();        // Create BLE client object
-
-    
+    if (connectToServer()) {
+      Serial.println("BLE setup complete.");
+    }
+    doConnect = false;
   }
 
-void sendData (String data_from_display){
-  if(data_from_display == "MF"){
-    Serial.println("motor forword");
-    
-  }
-  if(data_from_display == "MS"){
-    Serial.println("motor stop");
-  }
-  if(data_from_display == "MR"){
-    Serial.println("motor revers");
-  }
-   if(data_from_display == "144ON"){
-    Serial.println("144 relay on"); 
-  }  
-   if(data_from_display == "144OFF"){
-    Serial.println("144 relay off"); 
+  // Read from Nextion (ASCII text)
+  if (nextion.available()) {
+    String data = "";
+    delay(30); // Let buffer fill
+    while (nextion.available()) data += (char)nextion.read();
+    data.trim();
+    Serial.print("From Nextion: ");
+    Serial.println(data);
+
+    String bleCmd = mapNextionToBLE(data);
+    if (bleCmd.length() > 0) {
+      sendBLECommand(bleCmd);
+    } else {
+      Serial.println("Unknown Nextion command, not sent.");
+    }
   }
 
+  if (connected && !pClient->isConnected()) {
+    connected = false;
+    BLEDevice::getScan()->start(0);
+  }
+  delay(20);
 }
