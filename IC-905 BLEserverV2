@@ -14,10 +14,10 @@
 #define MOTOR_RIGHT_PIN 18
 #define MOTOR_STOP_PIN   5
 #define RELAY1_PIN      12
-#define RELAY2_PIN      13
+#define RELAY2_PIN      4
 #define RELAY3_PIN      14
 #define RELAY4_PIN      27
-#define RELAY5_PIN      26
+#define RELAY5_PIN      25
 
 #define SERVICE_UUID      "12345678-1234-5678-1234-56789abcdef0"
 #define STATUS_CHAR_UUID  "12345678-1234-5678-1234-56789abcdef1"
