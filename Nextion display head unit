@@ -1,0 +1,82 @@
+// Nextion NX4827P043-011R control display for IC-905 mobil controler.
+// this will remot control the rotor, asmith, read compass direction and control altenna relays/amplifiers.
+
+//#include <SoftwareSerial.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
+
+// --- BLE SERVICE AND CHARACTERISTIC UUIDS ---
+// These must match the server's UUIDs
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0" // Main BLE service
+#define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1" // Notification char (server->client)
+#define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2" // Write char (client->server)
+
+// --- BLE CLIENT STATE VARIABLES ---
+static boolean doConnect = false;                  // Set true when we find our server during scan
+static BLEAdvertisedDevice* myDevice = nullptr;    // Holds info on discovered BLE server
+BLEClient* pClient = nullptr;                      // BLE Client connection object
+BLERemoteCharacteristic* pStatusCharacteristic = nullptr;  // For notifications from server
+BLERemoteCharacteristic* pCommandCharacteristic = nullptr; // For sending commands to server
+// Nextion com pin setup
+#define TXD2 17
+#define RXD2 16
+//SoftwareSerial mySerial =  SoftwareSerial(rxPin, txPin);
+HardwareSerial mySerial(2);
+int counter = 0;
+
+void setup()  {
+ // Define pin modes for TX and RX  
+ Serial.begin(115200);
+ mySerial.begin(115200, SERIAL_8N1, RXD2, TXD2);  // UART setup
+ Serial.println("hello");
+ 
+  // --- BLE SCAN INITIALIZATION ---
+   BLEDevice::init("");                       // Initialize BLE stack (no client name needed)
+   BLEScan* pBLEScan = BLEDevice::getScan();  // Create BLE scan object
+   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+   pBLEScan->setActiveScan(true);             // More detailed advertising packets
+   pBLEScan->start(30, false);                // Start scan (max 30 seconds, non-blocking)
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+if(mySerial.available()){
+   String data_from_display="";
+   delay(30);
+   while(mySerial.available()) {
+     data_from_display += char(mySerial.read());
+   }
+   Serial.println (data_from_display);
+   sendData (data_from_display);
+  }
+
+  // --- BLE CONNECTION LOGIC: Connect after scan, get characteristics, register notify ---
+  if (doConnect && myDevice != nullptr) {
+    doConnect = false;                          // Prevent repeated attempts
+    Serial.println("Connecting to BLE server...");
+    pClient = BLEDevice::createClient();        // Create BLE client object
+
+    
+  }
+
+void sendData (String data_from_display){
+  if(data_from_display == "MF"){
+    Serial.println("motor forword");
+    
+  }
+  if(data_from_display == "MS"){
+    Serial.println("motor stop");
+  }
+  if(data_from_display == "MR"){
+    Serial.println("motor revers");
+  }
+   if(data_from_display == "144ON"){
+    Serial.println("144 relay on"); 
+  }  
+   if(data_from_display == "144OFF"){
+    Serial.println("144 relay off"); 
+  }
+
+}
