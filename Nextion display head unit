@@ -1,116 +1,184 @@
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEScan.h>
-#include <BLEAdvertisedDevice.h>
-#include <HardwareSerial.h>
 
-#define TXD2 17
-#define RXD2 16
-HardwareSerial nextion(2);
+// ==== IC-905 Nextion Display BLE Client with Status Feedback and Detailed Comments ====
 
-// BLE UUIDs (must match server)
-#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
-#define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1"
-#define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2"
+// --- INCLUDE REQUIRED LIBRARIES ---
+#include <BLEDevice.h>             // Core BLE functions for ESP32
+#include <BLEUtils.h>              // BLE utility functions (UUIDs, etc.)
+#include <BLEScan.h>               // BLE scanning functionality
+#include <BLEAdvertisedDevice.h>   // BLE device discovery
+#include <HardwareSerial.h>        // For Nextion serial communication
 
-// BLE variables
-static boolean doConnect = false;
-static BLEAdvertisedDevice* myDevice = nullptr;
-BLEClient* pClient = nullptr;
-BLERemoteCharacteristic* pCommandCharacteristic = nullptr;
-bool connected = false;
+// --- NEXTION SERIAL PORT CONFIGURATION ---
+#define TXD2 17                    // ESP32 TX pin connected to Nextion RX
+#define RXD2 16                    // ESP32 RX pin connected to Nextion TX
+HardwareSerial nextion(2);         // Use UART2 for Nextion
 
-// BLE scan callback
+// --- BLE SERVICE & CHARACTERISTIC UUIDs (MUST MATCH SERVER) ---
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0" // Main BLE service UUID
+#define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1" // Server-to-client notification UUID
+#define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2" // Client-to-server write UUID
+
+// --- BLE CLIENT STATE VARIABLES ---
+static boolean doConnect = false;                      // Flag to initiate connection attempt
+static BLEAdvertisedDevice* myDevice = nullptr;        // Pointer to discovered BLE server device
+BLEClient* pClient = nullptr;                          // BLE client instance
+BLERemoteCharacteristic* pCommandCharacteristic = nullptr; // Handle to server's command characteristic
+BLERemoteCharacteristic* pStatusCharacteristic = nullptr;  // Handle to server's status characteristic
+bool connected = false;                                // Connection state flag
+
+// --- BLE SCAN CALLBACK CLASS ---
+// Called every time a BLE device is found during scanning
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice advertisedDevice) {
-    if (advertisedDevice.haveServiceUUID() && advertisedDevice.getServiceUUID().toString() == SERVICE_UUID) {
-      myDevice = new BLEAdvertisedDevice(advertisedDevice);
-      doConnect = true;
-      BLEDevice::getScan()->stop();
+    // Check if this device advertises the correct service UUID
+    if (advertisedDevice.haveServiceUUID() &&
+        advertisedDevice.getServiceUUID().toString() == SERVICE_UUID) {
+      myDevice = new BLEAdvertisedDevice(advertisedDevice); // Save device info
+      doConnect = true;                                     // Set flag to connect
+      BLEDevice::getScan()->stop();                         // Stop scanning (device found)
     }
   }
 };
 
-// Connect to BLE server and get characteristic
+// --- BLE STATUS NOTIFICATION CALLBACK ---
+// Handles incoming notifications from server's status characteristic
+static void statusNotifyCallback(
+  BLERemoteCharacteristic* pBLERemoteCharacteristic,
+  uint8_t* pData,
+  size_t length,
+  bool isNotify) {
+    // Convert the received bytes into a String
+    String statusMsg = "";
+    for (size_t i = 0; i < length; i++) statusMsg += (char)pData[i];
+    Serial.print("[BLE] Status update from server: ");
+    Serial.println(statusMsg);
+
+    // --- FORWARD STATUS TO NEXTION DISPLAY ---
+    nextion.print(statusMsg);   // Send status text to Nextion
+    // Send Nextion required end-of-message bytes (three 0xFF)
+    nextion.write(0xFF); nextion.write(0xFF); nextion.write(0xFF);
+}
+
+// --- BLE CONNECTION FUNCTION ---
+// Connect to the discovered BLE server and set up characteristics
 bool connectToServer() {
-  pClient = BLEDevice::createClient();
-  if (!pClient->connect(myDevice)) return false;
+  Serial.println("[BLE] Attempting to connect to server...");
+  pClient = BLEDevice::createClient();            // Create BLE client instance
+  if (!pClient->connect(myDevice)) {              // Try connecting to server
+    Serial.println("[BLE] Connection failed.");
+    return false;
+  }
+  Serial.println("[BLE] Connected to server.");
+
+  // Obtain reference to the main BLE service
   BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
-  if (!pRemoteService) return false;
+  if (!pRemoteService) {
+    Serial.println("[BLE] Failed to find service UUID.");
+    return false;
+  }
+
+  // Obtain handle to command characteristic (for sending commands)
   pCommandCharacteristic = pRemoteService->getCharacteristic(COMMAND_CHAR_UUID);
-  if (!pCommandCharacteristic) return false;
-  connected = true;
+  if (!pCommandCharacteristic) {
+    Serial.println("[BLE] Failed to find command characteristic.");
+    return false;
+  }
+
+  // Obtain handle to status characteristic (for receiving notifications)
+  pStatusCharacteristic = pRemoteService->getCharacteristic(STATUS_CHAR_UUID);
+  if (pStatusCharacteristic && pStatusCharacteristic->canNotify()) {
+    // Register notification callback
+    pStatusCharacteristic->registerForNotify(statusNotifyCallback);
+    Serial.println("[BLE] Subscribed to status notifications.");
+  } else {
+    Serial.println("[BLE] Failed to find status characteristic or it can't notify.");
+  }
+
+  connected = true; // Set connection flag
   return true;
 }
 
-// Map Nextion ASCII text to BLE commands
+// --- COMMAND MAPPING FUNCTION ---
+// Maps Nextion ASCII commands to BLE command strings
 String mapNextionToBLE(const String& cmd) {
-  if (cmd == "MF") return "motor right";
-  if (cmd == "MR") return "motor left";
-  if (cmd == "144ON") return "relay 1";
-  if (cmd == "144OFF") return "relay 1";
-  if (cmd == "MS") return "motor stop";
-  if (cmd == "440OFF") return "relay 2";
-  if (cmd == "440ON") return "relay 2";
+  if (cmd == "MF")      return "motor right";
+  if (cmd == "MR")      return "motor left";
+  if (cmd == "144ON")   return "relay 1";
+  if (cmd == "144OFF")  return "relay 1";
+  if (cmd == "MS")      return "motor stop";
+  if (cmd == "440OFF")  return "relay 2";
+  if (cmd == "440ON")   return "relay 2";
   if (cmd == "1296OFF") return "relay 3";
-  if (cmd == "1296ON") return "relay 3";
+  if (cmd == "1296ON")  return "relay 3";
   if (cmd == "2304OFF") return "relay 4";
-  if (cmd == "2304ON") return "relay 4";
+  if (cmd == "2304ON")  return "relay 4";
   if (cmd == "5760OFF") return "relay 5";
-  if (cmd == "5760ON") return "relay 5";
-  if (cmd == "CP") return "control power";
-  // Add more as needed
-  return "";
+  if (cmd == "5760ON")  return "relay 5";
+  if (cmd == "CP")      return "control power";
+  // Add more mappings as needed for additional buttons/relays
+  return ""; // Unrecognized command
 }
 
-// Send mapped command to BLE server
+// --- BLE COMMAND SENDING FUNCTION ---
+// Sends BLE command string to server's command characteristic
 void sendBLECommand(const String& mappedCmd) {
   if (connected && pCommandCharacteristic) {
     pCommandCharacteristic->writeValue(mappedCmd.c_str(), mappedCmd.length());
-    Serial.print("Sent BLE: "); Serial.println(mappedCmd);
+    Serial.print("[BLE] Sent command: "); Serial.println(mappedCmd);
   } else {
-    Serial.println("Not connected! Could not send BLE command.");
+    Serial.println("[BLE] Not connected! Could not send BLE command.");
   }
 }
 
+// --- ARDUINO SETUP FUNCTION ---
 void setup() {
-  Serial.begin(115200);
-  nextion.begin(115200, SERIAL_8N1, RXD2, TXD2);
-  BLEDevice::init("");
-  BLEScan* pBLEScan = BLEDevice::getScan();
-  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-  pBLEScan->setActiveScan(true);
-  pBLEScan->start(30, false);
+  // --- SERIAL SETUP FOR DEBUGGING AND NEXTION ---
+  Serial.begin(115200);                                // Debug serial
+  nextion.begin(115200, SERIAL_8N1, RXD2, TXD2);       // Nextion serial
+
+  // --- BLE INITIALIZATION AND SCANNING ---
+  BLEDevice::init("");                                 // Initialize BLE stack
+  BLEScan* pBLEScan = BLEDevice::getScan();            // Get BLE scanner
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks()); // Set scan callback
+  pBLEScan->setActiveScan(true);                       // Active scan for more details
+  pBLEScan->start(30, false);                          // Start scanning (30s timeout or until device found)
 }
 
+// --- ARDUINO MAIN LOOP FUNCTION ---
 void loop() {
+  // --- HANDLE BLE CONNECTION ATTEMPT ---
   if (doConnect && myDevice != nullptr) {
     if (connectToServer()) {
-      Serial.println("BLE setup complete.");
+      Serial.println("[BLE] BLE setup complete.");
     }
-    doConnect = false;
+    doConnect = false; // Reset flag after attempting connection
   }
 
-  // Read from Nextion (ASCII text)
+  // --- READ COMMANDS FROM NEXTION DISPLAY (VIA SERIAL) ---
   if (nextion.available()) {
     String data = "";
-    delay(30); // Let buffer fill
+    delay(30); // Wait for serial buffer to fill
     while (nextion.available()) data += (char)nextion.read();
-    data.trim();
-    Serial.print("From Nextion: ");
+    data.trim(); // Remove whitespace
+
+    Serial.print("[NEXTION] Received: ");
     Serial.println(data);
 
+    // Map Nextion command to BLE command string
     String bleCmd = mapNextionToBLE(data);
     if (bleCmd.length() > 0) {
-      sendBLECommand(bleCmd);
+      sendBLECommand(bleCmd); // Send command to BLE server
     } else {
-      Serial.println("Unknown Nextion command, not sent.");
+      Serial.println("[NEXTION] Unknown command, not sent.");
     }
   }
 
+  // --- HANDLE BLE RECONNECTION IF LOST ---
   if (connected && !pClient->isConnected()) {
     connected = false;
-    BLEDevice::getScan()->start(0);
+    Serial.println("[BLE] Disconnected. Restarting scan...");
+    BLEDevice::getScan()->start(0); // Start scanning again (no timeout)
   }
-  delay(20);
+
+  delay(20); // Small delay to avoid excessive CPU usage
 }
