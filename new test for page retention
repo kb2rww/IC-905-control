@@ -1,0 +1,91 @@
+
+if(relay0.val==0)
+{
+  relay0.val=1
+  printh 72 65 6C 61 79 30 5F 6F 6E FF FF FF
+}
+else
+{
+  relay0.val=0
+  printh 72 65 6C 61 79 30 5F 6F 66 66 FF FF FF
+}
+
+## Button: relay0_btn
+
+
+if(relay1.val==0)
+{
+  relay1.val=1
+  printh 72 65 6C 61 79 31 5F 6F 6E FF FF FF
+}
+else
+{
+  relay1.val=0
+  printh 72 65 6C 61 79 31 5F 6F 66 66 FF FF FF
+}
+
+
+## page load event
+
+printh 70 61 67 65 5F 72 65 6C 61 79 FF FF FF
+
+
+##for the ESP32
+#include <Preferences.h>
+
+Preferences prefs;
+bool relayStates[10];
+int relayPins[10] = {2, 4, 5, 12, 13, 14, 15, 16, 17, 18};
+
+void saveRelayStates() {
+  prefs.begin("relays", false);
+  for (int i = 0; i < 10; i++) {
+    prefs.putBool(("relay" + String(i)).c_str(), relayStates[i]);
+  }
+  prefs.end();
+}
+
+void loadRelayStates() {
+  prefs.begin("relays", true);
+  for (int i = 0; i < 10; i++) {
+    relayStates[i] = prefs.getBool(("relay" + String(i)).c_str(), false);
+  }
+  prefs.end();
+}
+
+void updateRelayOutputs() {
+  for (int i = 0; i < 10; i++) {
+    digitalWrite(relayPins[i], relayStates[i]);
+  }
+}
+
+void updateNextion() {
+  for (int i = 0; i < 10; i++) {
+    Serial2.print("relay" + String(i) + ".val=");
+    Serial2.print(relayStates[i] ? 1 : 0);
+    Serial2.write(0xFF); Serial2.write(0xFF); Serial2.write(0xFF);
+  }
+}
+
+void setup() {
+  for (int i = 0; i < 10; i++) {
+    pinMode(relayPins[i], OUTPUT);
+  }
+  Serial2.begin(9600, SERIAL_8N1, 21, 22); // RX=21, TX=22
+  loadRelayStates();
+  updateRelayOutputs();
+  updateNextion();
+}
+
+void loop() {
+  if (Serial2.available()) {
+    String cmd = Serial2.readStringUntil('ÿ');
+    for (int i = 0; i < 10; i++) {
+      if (cmd.indexOf("relay" + String(i) + "_on") != -1) relayStates[i] = true;
+      else if (cmd.indexOf("relay" + String(i) + "_off") != -1) relayStates[i] = false;
+    }
+    if (cmd.indexOf("page_relay") != -1) updateNextion();
+    updateRelayOutputs();
+    saveRelayStates();
+  }
+}
