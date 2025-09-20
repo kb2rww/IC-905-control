@@ -1,0 +1,84 @@
+#include <Arduino.h>
+#include <Preferences.h> // For non-volatile storage
+
+#define NUM_MOTOR_BTNS 3      // Example: Power, Motor Left, Motor Right (Page 1)
+#define NUM_PAGE2_BTNS 10     // 10 buttons on Page 2
+
+Preferences prefs;
+
+// State arrays
+bool motorBtns[NUM_MOTOR_BTNS] = {false};
+bool page2Btns[NUM_PAGE2_BTNS] = {false};
+
+// Helper: Save all states to NVS
+void saveStates() {
+  prefs.begin("btnstates", false);
+  for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
+    prefs.putBool(("motor"+String(i)).c_str(), motorBtns[i]);
+  }
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
+    prefs.putBool(("p2btn"+String(i)).c_str(), page2Btns[i]);
+  }
+  prefs.end();
+}
+
+// Helper: Load all states from NVS
+void loadStates() {
+  prefs.begin("btnstates", true);
+  for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
+    motorBtns[i] = prefs.getBool(("motor"+String(i)).c_str(), false);
+  }
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
+    page2Btns[i] = prefs.getBool(("p2btn"+String(i)).c_str(), false);
+  }
+  prefs.end();
+}
+
+// Send current state to Nextion (adapt as needed for your display/buttons)
+void updateNextionPage1() {
+  for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
+    Serial2.printf("btn%d.val=%d\xff\xff\xff", i+1, motorBtns[i]);
+  }
+}
+void updateNextionPage2() {
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
+    Serial2.printf("btn2_%d.val=%d\xff\xff\xff", i+1, page2Btns[i]);
+  }
+}
+
+// Parse Nextion touch events and update button states
+void handleNextionEvent(String cmd) {
+  // Example: Assume Nextion sends "p1btn1" or "p2btn3"
+  if (cmd.startsWith("p1btn")) {
+    int idx = cmd.substring(5).toInt()-1;
+    if (idx >= 0 && idx < NUM_MOTOR_BTNS) {
+      motorBtns[idx] = !motorBtns[idx];
+      saveStates();
+      updateNextionPage1();
+    }
+  } else if (cmd.startsWith("p2btn")) {
+    int idx = cmd.substring(5).toInt()-1;
+    if (idx >= 0 && idx < NUM_PAGE2_BTNS) {
+      page2Btns[idx] = !page2Btns[idx];
+      saveStates();
+      updateNextionPage2();
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);     // Debug
+  Serial2.begin(115200);      // For Nextion (use your wiring)
+  loadStates();
+  updateNextionPage1();
+  updateNextionPage2();
+}
+
+void loop() {
+  // Read Nextion serial input
+  if (Serial2.available()) {
+    String cmd = Serial2.readStringUntil('\xff'); // Commands end with 0xFF 0xFF 0xFF
+    handleNextionEvent(cmd);
+  }
+  // ... your other code (BLE, etc) ...
+}
