@@ -1,11 +1,12 @@
 #include <Arduino.h>
 #include <Preferences.h> // For non-volatile storage
+#include <HardwareSerial.h>       // For secondary hardware serial (Nextion display)
 
 #define NUM_MOTOR_BTNS 3      // Example: Power, Motor Left, Motor Right (Page 1)
 #define NUM_PAGE2_BTNS 10     // 10 buttons on Page 2
 // --- Define TX/RX pins for Serial2 to Nextion display (adjust to your wiring) ---
 #define TXD2 17                    // ESP32 GPIO17 to Nextion RX
-#define RXD2 16                    // ESP32 GPIO16 to Nextion TX
+#define RXD2 4                    // ESP32 GPIO16 to Nextion TX
 Preferences prefs;
 
 // State arrays
@@ -111,7 +112,7 @@ void handleNextionEvent(String cmd) {
 
 void setup() {
   Serial.begin(115200);     // Debug
-  Serial2.begin(115200);      // For Nextion (use your wiring)
+  Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
   Serial.println("=== Setup started ===");
   loadStates();
   updateNextionPage1();
@@ -120,6 +121,12 @@ void setup() {
 }
 
 void loop() {
+  // Print all bytes received from Serial2 (Nextion)
+  while (Serial2.available()) {
+  uint8_t b = Serial2.read();
+  Serial.printf("[Serial2 RX] 0x%02X '%c'\n", b, isprint(b) ? b : '.');
+ }
+  
   // Passthrough: Serial2 (Nextion) -> Serial (PC)
   while (Serial2.available()) {
     uint8_t b = Serial2.read();
