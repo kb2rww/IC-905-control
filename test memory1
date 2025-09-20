@@ -3,82 +3,152 @@
 
 #define NUM_MOTOR_BTNS 3      // Example: Power, Motor Left, Motor Right (Page 1)
 #define NUM_PAGE2_BTNS 10     // 10 buttons on Page 2
-
+// --- Define TX/RX pins for Serial2 to Nextion display (adjust to your wiring) ---
+#define TXD2 17                    // ESP32 GPIO17 to Nextion RX
+#define RXD2 16                    // ESP32 GPIO16 to Nextion TX
 Preferences prefs;
 
 // State arrays
 bool motorBtns[NUM_MOTOR_BTNS] = {false};
 bool page2Btns[NUM_PAGE2_BTNS] = {false};
 
+void logButtonStates() {
+  Serial.print("MOTOR BTNS: ");
+  for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
+    Serial.printf("[%d]=%d ", i, motorBtns[i]);
+  }
+  Serial.print(" | PAGE2 BTNS: ");
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
+    Serial.printf("[%d]=%d ", i, page2Btns[i]);
+  }
+  Serial.println();
+}
+
 // Helper: Save all states to NVS
 void saveStates() {
+  Serial.println("saveStates() called");
   prefs.begin("btnstates", false);
   for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
     prefs.putBool(("motor"+String(i)).c_str(), motorBtns[i]);
+    Serial.printf("Saved: motorBtn[%d] = %d\n", i, motorBtns[i]);
   }
   for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
     prefs.putBool(("p2btn"+String(i)).c_str(), page2Btns[i]);
+    Serial.printf("Saved: page2Btn[%d] = %d\n", i, page2Btns[i]);
   }
   prefs.end();
+  Serial.println("States saved to NVS.");
 }
 
 // Helper: Load all states from NVS
 void loadStates() {
+  Serial.println("loadStates() called");
   prefs.begin("btnstates", true);
   for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
     motorBtns[i] = prefs.getBool(("motor"+String(i)).c_str(), false);
+    Serial.printf("Loaded: motorBtn[%d] = %d\n", i, motorBtns[i]);
   }
   for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
     page2Btns[i] = prefs.getBool(("p2btn"+String(i)).c_str(), false);
+    Serial.printf("Loaded: page2Btn[%d] = %d\n", i, page2Btns[i]);
   }
   prefs.end();
+  Serial.println("States loaded from NVS.");
+  logButtonStates();
 }
 
 // Send current state to Nextion (adapt as needed for your display/buttons)
 void updateNextionPage1() {
+  Serial.println("updateNextionPage1() called");
   for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
     Serial2.printf("btn%d.val=%d\xff\xff\xff", i+1, motorBtns[i]);
+    Serial.printf("Sent to Nextion: btn%d.val=%d [motorBtn[%d]=%d]\n", i+1, motorBtns[i], i, motorBtns[i]);
   }
 }
 void updateNextionPage2() {
+  Serial.println("updateNextionPage2() called");
   for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
     Serial2.printf("btn2_%d.val=%d\xff\xff\xff", i+1, page2Btns[i]);
+    Serial.printf("Sent to Nextion: btn2_%d.val=%d [page2Btn[%d]=%d]\n", i+1, page2Btns[i], i, page2Btns[i]);
   }
 }
 
 // Parse Nextion touch events and update button states
 void handleNextionEvent(String cmd) {
-  // Example: Assume Nextion sends "p1btn1" or "p2btn3"
+  Serial.printf("handleNextionEvent() called with: '%s'\n", cmd.c_str());
+  if (cmd.length() == 0) {
+    Serial.println("Warning: Empty command received.");
+    return;
+  }
   if (cmd.startsWith("p1btn")) {
     int idx = cmd.substring(5).toInt()-1;
     if (idx >= 0 && idx < NUM_MOTOR_BTNS) {
+      Serial.printf("Button event: p1btn%d (index %d) current=%d\n", idx+1, idx, motorBtns[idx]);
       motorBtns[idx] = !motorBtns[idx];
+      Serial.printf("New motorBtn[%d] state: %d\n", idx, motorBtns[idx]);
       saveStates();
       updateNextionPage1();
+      logButtonStates();
+    } else {
+      Serial.printf("Warning: p1btn index %d out of range!\n", idx);
     }
   } else if (cmd.startsWith("p2btn")) {
     int idx = cmd.substring(5).toInt()-1;
     if (idx >= 0 && idx < NUM_PAGE2_BTNS) {
+      Serial.printf("Button event: p2btn%d (index %d) current=%d\n", idx+1, idx, page2Btns[idx]);
       page2Btns[idx] = !page2Btns[idx];
+      Serial.printf("New page2Btn[%d] state: %d\n", idx, page2Btns[idx]);
       saveStates();
       updateNextionPage2();
+      logButtonStates();
+    } else {
+      Serial.printf("Warning: p2btn index %d out of range!\n", idx);
     }
+  } else {
+    Serial.printf("Unknown command received: '%s'\n", cmd.c_str());
   }
 }
 
 void setup() {
   Serial.begin(115200);     // Debug
   Serial2.begin(115200);      // For Nextion (use your wiring)
+  Serial.println("=== Setup started ===");
   loadStates();
   updateNextionPage1();
   updateNextionPage2();
+  Serial.println("=== Setup complete ===");
 }
 
 void loop() {
-  // Read Nextion serial input
-  if (Serial2.available()) {
-    String cmd = Serial2.readStringUntil('\xff'); // Commands end with 0xFF 0xFF 0xFF
-    handleNextionEvent(cmd);
+  // Passthrough: Serial2 (Nextion) -> Serial (PC)
+  while (Serial2.available()) {
+    uint8_t b = Serial2.read();
+    Serial.write(b); // Directly echo raw byte to PC
   }
+
+  // Passthrough: Serial (PC) -> Serial2 (Nextion)
+  while (Serial.available()) {
+    uint8_t b = Serial.read();
+    Serial2.write(b); // Forward to Nextion
+    // Optional: log what you sent
+    Serial.printf("[PC->Nextion] 0x%02X '%c'\n", b, isprint(b) ? b : '.');
+  }
+
+  // Nextion command handling as before, but only after full command received!
+  // We'll use a static buffer to assemble complete commands terminated by 0xFF
+  static String nextionCmd;
+  while (Serial2.available()) {
+    char c = Serial2.read();
+    if ((uint8_t)c == 0xFF) { // End of command
+      if (nextionCmd.length() > 0) {
+        Serial.printf("[Nextion RX] '%s'\n", nextionCmd.c_str());
+        handleNextionEvent(nextionCmd);
+        nextionCmd = "";
+      }
+    } else {
+      nextionCmd += c;
+    }
+  }
+
   // ... your other code (BLE, etc) ...
 }
