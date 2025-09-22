@@ -1,0 +1,185 @@
+/*
+  Example: Using EasyNextionLibrary to manage two pages of buttons and state storage on ESP32
+  Author: Copilot
+  Repo context: kb2rww/IC-905-control
+
+  This example shows how to use EasyNextionLibrary to handle Nextion button presses,
+  update the display, and save/restore button states to ESP32's non-volatile storage.
+*/
+
+#include <Arduino.h>
+#include <Preferences.h>          // For ESP32 non-volatile storage
+#include "EasyNextionLibrary.h"   // Main library for Nextion display
+
+// ----------- USER-CONFIGURABLE SECTION ----------- //
+#define NUM_MOTOR_BTNS 3
+#define NUM_PAGE2_BTNS 10
+
+#define TXD2 17 // ESP32 TX2 -> Nextion RX
+#define RXD2 4  // ESP32 RX2 <- Nextion TX
+
+// ----------- GLOBALS ----------- //
+Preferences prefs; // For saving button states
+
+// Arrays to hold button states
+bool motorBtns[NUM_MOTOR_BTNS] = {false};
+bool page2Btns[NUM_PAGE2_BTNS] = {false};
+
+// Instantiate EasyNex object on Serial2
+EasyNex myNex(Serial2);
+
+// ----------- FUNCTION DECLARATIONS ----------- //
+void logButtonStates();
+void saveStates();
+void loadStates();
+void syncPage1();
+void syncPage2();
+
+// ----------- SETUP ----------- //
+void setup() {
+  Serial.begin(115200);
+  Serial.println("=== EasyNextion Example Setup ===");
+
+  // Initialize Serial2 for Nextion
+  Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
+  myNex.begin(115200);
+
+  loadStates();    // Load states from NVS
+  syncPage1();     // Sync states to Nextion page 1
+  syncPage2();     // Sync states to Nextion page 2
+
+  Serial.println("=== Setup complete ===");
+}
+
+// ----------- MAIN LOOP ----------- //
+void loop() {
+  myNex.NextionListen(); // Process any incoming Nextion events
+
+  // Example: passthrough for debugging (PC Serial -> Nextion)
+  // Type commands in Serial Monitor to send to display
+  while (Serial.available()) {
+    char c = Serial.read();
+    Serial2.write(c);
+  }
+}
+
+// ----------- EASYNEXTION EVENT HANDLERS ----------- //
+// All touch events from Nextion come here as callbacks.
+// You must register them at the bottom of this file!
+
+// Handler for page 1 motor buttons (btn1, btn2, btn3)
+void motorBtnHandler() {
+  // Get which button was pressed
+  String compName = myNex.currentComponent; // e.g., "btn1"
+  int idx = compName.substring(3).toInt() - 1; // "btn1" -> 0
+
+  if (idx >= 0 && idx < NUM_MOTOR_BTNS) {
+    motorBtns[idx] = !motorBtns[idx]; // Toggle button
+    Serial.printf("Toggled motorBtn[%d] to %d\n", idx, motorBtns[idx]);
+    saveStates();
+    syncPage1();
+    logButtonStates();
+  }
+}
+
+// Handler for page 2 buttons (btn2_1 ... btn2_10)
+void page2BtnHandler() {
+  String compName = myNex.currentComponent; // e.g., "btn2_3"
+  int idx = compName.substring(5).toInt() - 1; // "btn2_3" -> 2
+
+  if (idx >= 0 && idx < NUM_PAGE2_BTNS) {
+    page2Btns[idx] = !page2Btns[idx]; // Toggle button
+    Serial.printf("Toggled page2Btn[%d] to %d\n", idx, page2Btns[idx]);
+    saveStates();
+    syncPage2();
+    logButtonStates();
+  }
+}
+
+// Handler for page change events (if you add page notifications in HMI)
+void page1Handler() {
+  Serial.println("Page 1 event: refreshing page 1 buttons.");
+  syncPage1();
+}
+
+void page2Handler() {
+  Serial.println("Page 2 event: refreshing page 2 buttons.");
+  syncPage2();
+}
+
+// ----------- SYNC BUTTON STATES TO NEXTION ----------- //
+void syncPage1() {
+  for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
+    String btnName = "btn" + String(i + 1);
+    myNex.writeNum(btnName + ".val", motorBtns[i]);
+    Serial.printf("Set %s.val=%d\n", btnName.c_str(), motorBtns[i]);
+  }
+}
+
+void syncPage2() {
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
+    String btnName = "btn2_" + String(i + 1);
+    myNex.writeNum(btnName + ".val", page2Btns[i]);
+    Serial.printf("Set %s.val=%d\n", btnName.c_str(), page2Btns[i]);
+  }
+}
+
+// ----------- LOGGING, SAVING, LOADING ----------- //
+void logButtonStates() {
+  Serial.print("MOTOR BTNS: ");
+  for (int i = 0; i < NUM_MOTOR_BTNS; i++) {
+    Serial.printf("[%d]=%d ", i, motorBtns[i]);
+  }
+  Serial.print(" | PAGE2 BTNS: ");
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
+    Serial.printf("[%d]=%d ", i, page2Btns[i]);
+  }
+  Serial.println();
+}
+
+void saveStates() {
+  prefs.begin("btnstates", false);
+  for (int i = 0; i < NUM_MOTOR_BTNS; i++)
+    prefs.putBool(("motor" + String(i)).c_str(), motorBtns[i]);
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++)
+    prefs.putBool(("p2btn" + String(i)).c_str(), page2Btns[i]);
+  prefs.end();
+  Serial.println("States saved.");
+}
+
+void loadStates() {
+  prefs.begin("btnstates", true);
+  for (int i = 0; i < NUM_MOTOR_BTNS; i++)
+    motorBtns[i] = prefs.getBool(("motor" + String(i)).c_str(), false);
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++)
+    page2Btns[i] = prefs.getBool(("p2btn" + String(i)).c_str(), false);
+  prefs.end();
+  Serial.println("States loaded.");
+  logButtonStates();
+}
+
+// ----------- EASYNEXTION EVENT REGISTRATION ----------- //
+/*
+  Register button event handlers with EasyNextionLibrary.
+  This must be done outside setup()/loop(), after all function definitions.
+  You can use the component name from your HMI exactly.
+*/
+EASYNEXTION_EVENT(btn1, motorBtnHandler);     // Page 1 button 1
+EASYNEXTION_EVENT(btn2, motorBtnHandler);     // Page 1 button 2
+EASYNEXTION_EVENT(btn3, motorBtnHandler);     // Page 1 button 3
+
+// Page 2 buttons (btn2_1 to btn2_10)
+EASYNEXTION_EVENT(btn2_1, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_2, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_3, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_4, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_5, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_6, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_7, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_8, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_9, page2BtnHandler);
+EASYNEXTION_EVENT(btn2_10, page2BtnHandler);
+
+// Optionally, register page events if you have page notifications in HMI
+EASYNEXTION_EVENT(page1, page1Handler);
+EASYNEXTION_EVENT(page2, page2Handler);
