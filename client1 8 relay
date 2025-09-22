@@ -1,0 +1,45 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+
+#define SERVICE_UUID "12345678-1234-5678-1234-56789abcdef0"
+
+// UUIDs for relays 1–8
+const char* relayUUIDs[8] = {
+  "12345678-1234-5678-1234-56789abcde01",
+  "12345678-1234-5678-1234-56789abcde02",
+  "12345678-1234-5678-1234-56789abcde03",
+  "12345678-1234-5678-1234-56789abcde04",
+  "12345678-1234-5678-1234-56789abcde05",
+  "12345678-1234-5678-1234-56789abcde06",
+  "12345678-1234-5678-1234-56789abcde07",
+  "12345678-1234-5678-1234-56789abcde08"
+};
+
+BLEClient* pClient;
+BLERemoteCharacteristic* relayChar[8];
+
+void setup() {
+  Serial.begin(115200);
+  BLEDevice::init("");
+  pClient = BLEDevice::createClient();
+
+  // Scan and connect (similar to your current approach)
+  // ... scan code omitted for brevity ...
+
+  // After connecting:
+  BLERemoteService* pService = pClient->getService(SERVICE_UUID);
+  for (int i = 0; i < 8; i++) {
+    relayChar[i] = pService->getCharacteristic(relayUUIDs[i]);
+  }
+}
+
+void loop() {
+  // Example: Toggle all 8 relays every 2 seconds
+  static bool state = false;
+  state = !state;
+  for (int i = 0; i < 8; i++) {
+    if (relayChar[i])
+      relayChar[i]->writeValue((uint8_t*)&state, 1);
+  }
+  delay(2000);
+}
