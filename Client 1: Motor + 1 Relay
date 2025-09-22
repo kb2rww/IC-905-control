@@ -1,0 +1,85 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEClient.h>
+
+// BLE UUIDs
+#define SERVER_NAME         "ESP32-IC905"
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
+#define SPEED_CHAR_UUID     "12345678-1234-5678-1234-56789abcde01"
+#define DIRECTION_CHAR_UUID "12345678-1234-5678-1234-56789abcde02"
+#define RELAY1_CHAR_UUID    "12345678-1234-5678-1234-56789abcde03"
+
+// Motor control pins
+#define IN1 25
+#define IN2 26
+#define PWM_CHANNEL1 0
+#define PWM_CHANNEL2 1
+#define PWM_FREQ 1000
+#define PWM_RESOLUTION 8
+
+// Relay control pin
+#define RELAY_PIN 27
+
+BLEClient* pClient;
+BLERemoteCharacteristic *speedChar, *directionChar, *relay1Char;
+
+void setupPWM() {
+  ledcSetup(PWM_CHANNEL1, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL2, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(IN1, PWM_CHANNEL1);
+  ledcAttachPin(IN2, PWM_CHANNEL2);
+}
+
+void setMotor(bool forward, uint8_t speed) {
+  if (forward) {
+    ledcWrite(PWM_CHANNEL1, speed);
+    ledcWrite(PWM_CHANNEL2, 0);
+  } else {
+    ledcWrite(PWM_CHANNEL1, 0);
+    ledcWrite(PWM_CHANNEL2, speed);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(RELAY_PIN, OUTPUT);
+  setupPWM();
+
+  BLEDevice::init("");
+  pClient = BLEDevice::createClient();
+
+  BLEScan* pScan = BLEDevice::getScan();
+  BLEScanResults foundDevices = pScan->start(5);
+  for (int i = 0; i < foundDevices.getCount(); i++) {
+    BLEAdvertisedDevice d = foundDevices.getDevice(i);
+    if (d.getName() == SERVER_NAME) {
+      pClient->connect(&d);
+      break;
+    }
+  }
+
+  if (pClient->isConnected()) {
+    BLERemoteService* pService = pClient->getService(SERVICE_UUID);
+    speedChar     = pService->getCharacteristic(SPEED_CHAR_UUID);
+    directionChar = pService->getCharacteristic(DIRECTION_CHAR_UUID);
+    relay1Char    = pService->getCharacteristic(RELAY1_CHAR_UUID);
+    Serial.println("Motor client connected.");
+  } else {
+    Serial.println("Failed to connect.");
+  }
+}
+
+void loop() {
+  if (!pClient->isConnected()) return;
+
+  uint8_t speed = speedChar->readValue()[0];
+  bool direction = directionChar->readValue()[0];
+  bool relayState = relay1Char->readValue()[0];
+
+  setMotor(direction, speed);
+  digitalWrite(RELAY_PIN, relayState);
+
+  Serial.printf("Speed: %d | Direction: %s | Relay: %d\n", speed, direction ? "Forward" : "Reverse", relayState);
+  delay(200);
+}
