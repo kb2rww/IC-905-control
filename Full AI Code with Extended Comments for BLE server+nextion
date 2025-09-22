@@ -1,0 +1,140 @@
+#include <Arduino.h>
+#include <EasyNextionLibrary.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <Preferences.h>
+
+// BLE UUIDs
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
+#define SPEED_CHAR_UUID     "12345678-1234-5678-1234-56789abcde01"
+#define DIRECTION_CHAR_UUID "12345678-1234-5678-1234-56789abcde02"
+#define RELAY1_CHAR_UUID    "12345678-1234-5678-1234-56789abcde03"
+#define RELAYS_CHAR_UUID    "12345678-1234-5678-1234-56789abcde04"
+
+// Nextion serial
+EasyNex myNex(Serial);
+
+// BLE characteristics
+BLECharacteristic* speedChar;
+BLECharacteristic* directionChar;
+BLECharacteristic* relay1Char;
+BLECharacteristic* relaysChar;
+
+// Persistent storage
+Preferences prefs;
+
+// State variables
+uint8_t speedValue = 0;
+bool direction = true; // true = forward, false = reverse
+bool relay1 = false;
+uint8_t relaysBitmask = 0; // 8 relays as bits
+
+void setup() {
+  Serial.begin(9600); // Nextion default baud
+  myNex.begin(9600);
+
+  // Load saved state
+  prefs.begin("nextion", true);
+  speedValue = prefs.getUChar("speed", 0);
+  direction = prefs.getBool("direction", true);
+  relay1 = prefs.getBool("relay1", false);
+  relaysBitmask = prefs.getUChar("relays", 0);
+  prefs.end();
+
+  // BLE setup
+  BLEDevice::init("ESP32-IC905");
+  BLEServer* pServer = BLEDevice::createServer();
+  BLEService* pService = pServer->createService(SERVICE_UUID);
+
+  speedChar     = pService->createCharacteristic(SPEED_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  directionChar = pService->createCharacteristic(DIRECTION_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  relay1Char    = pService->createCharacteristic(RELAY1_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  relaysChar    = pService->createCharacteristic(RELAYS_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+
+  pService->start();
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->start();
+
+  Serial.println("BLE server started. Waiting for Nextion input...");
+
+  // Send initial state to clients
+  speedChar->setValue(&speedValue, 1);
+  directionChar->setValue((uint8_t*)&direction, 1);
+  relay1Char->setValue((uint8_t*)&relay1, 1);
+  relaysChar->setValue(&relaysBitmask, 1);
+}
+
+void loop() {
+  myNex.NextionListen(); // Check for Nextion input
+}
+
+// Called when a Nextion component is touched
+void triggerComponent() {
+  uint8_t compID = myNex.readComponentID();
+
+  // Example mapping:
+  // btn1 = forward, btn2 = reverse, btn3 = relay1
+  // btn4–btn11 = relays 1–8
+
+  switch (compID) {
+    case 1: // Forward
+      direction = true;
+      prefs.begin("nextion", false);
+      prefs.putBool("direction", direction);
+      prefs.end();
+      directionChar->setValue((uint8_t*)&direction, 1);
+      directionChar->notify();
+      break;
+
+    case 2: // Reverse
+      direction = false;
+      prefs.begin("nextion", false);
+      prefs.putBool("direction", direction);
+      prefs.end();
+      directionChar->setValue((uint8_t*)&direction, 1);
+      directionChar->notify();
+      break;
+
+    case 3: // Relay 1 toggle
+      relay1 = !relay1;
+      prefs.begin("nextion", false);
+      prefs.putBool("relay1", relay1);
+      prefs.end();
+      relay1Char->setValue((uint8_t*)&relay1, 1);
+      relay1Char->notify();
+      break;
+
+    case 4 ... 11: // Relays 1–8
+      {
+        uint8_t relayIndex = compID - 4;
+        relaysBitmask ^= (1 << relayIndex); // Toggle bit
+        prefs.begin("nextion", false);
+        prefs.putUChar("relays", relaysBitmask);
+        prefs.end();
+        relaysChar->setValue(&relaysBitmask, 1);
+        relaysChar->notify();
+      }
+      break;
+
+    default:
+      Serial.printf("Unknown Component ID: %d\n", compID);
+      break;
+  }
+}
+
+// Called when a Nextion variable changes (e.g., slider)
+void triggerValue() {
+  String objName = myNex.readName();
+  int value = myNex.readNumber();
+
+  if (objName == "h0") { // Slider component
+    speedValue = constrain(value, 0, 255);
+    prefs.begin("nextion", false);
+    prefs.putUChar("speed", speedValue);
+    prefs.end();
+    speedChar->setValue(&speedValue, 1);
+    speedChar->notify();
+  }
+}
