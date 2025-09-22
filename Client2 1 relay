@@ -1,0 +1,43 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+
+#define SERVICE_UUID "12345678-1234-5678-1234-56789abcdef0"
+#define RELAY_UUID   "12345678-1234-5678-1234-56789abcde09" // For relay 9 (btn2_9)
+#define SLIDER_UUID  "12345678-1234-5678-1234-56789abcdea4" // For slider1
+
+BLEClient* pClient;
+BLERemoteCharacteristic* relayChar = nullptr;
+BLERemoteCharacteristic* sliderChar = nullptr;
+
+void setup() {
+  Serial.begin(115200);
+  BLEDevice::init("");
+  pClient = BLEDevice::createClient();
+
+  // Scan and connect (similar to your current approach)
+  // ... scan code omitted for brevity ...
+
+  BLERemoteService* pService = pClient->getService(SERVICE_UUID);
+  relayChar = pService->getCharacteristic(RELAY_UUID);
+  sliderChar = pService->getCharacteristic(SLIDER_UUID);
+}
+
+void loop() {
+  // Example: Turn relay ON, move slider to 100
+  if (relayChar)
+    relayChar->writeValue((uint8_t*)"\x01", 1); // ON
+  if (sliderChar) {
+    uint8_t sliderVal = 100;
+    sliderChar->writeValue(&sliderVal, 1);
+  }
+  delay(2000);
+
+  // Example: Turn relay OFF, move slider to 0
+  if (relayChar)
+    relayChar->writeValue((uint8_t*)"\x00", 1); // OFF
+  if (sliderChar) {
+    uint8_t sliderVal = 0;
+    sliderChar->writeValue(&sliderVal, 1);
+  }
+  delay(2000);
+}
