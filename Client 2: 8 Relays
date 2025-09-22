@@ -1,0 +1,57 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEClient.h>
+
+// BLE UUIDs
+#define SERVER_NAME      "ESP32-IC905"
+#define SERVICE_UUID     "12345678-1234-5678-1234-56789abcdef0"
+#define RELAYS_CHAR_UUID "12345678-1234-5678-1234-56789abcde04"
+
+// Relay pins
+const uint8_t relayPins[8] = {2, 4, 5, 16, 17, 18, 19, 21};
+
+BLEClient* pClient;
+BLERemoteCharacteristic* relaysChar;
+
+void setup() {
+  Serial.begin(115200);
+  for (int i = 0; i < 8; i++) {
+    pinMode(relayPins[i], OUTPUT);
+  }
+
+  BLEDevice::init("");
+  pClient = BLEDevice::createClient();
+
+  BLEScan* pScan = BLEDevice::getScan();
+  BLEScanResults foundDevices = pScan->start(5);
+  for (int i = 0; i < foundDevices.getCount(); i++) {
+    BLEAdvertisedDevice d = foundDevices.getDevice(i);
+    if (d.getName() == SERVER_NAME) {
+      pClient->connect(&d);
+      break;
+    }
+  }
+
+  if (pClient->isConnected()) {
+    BLERemoteService* pService = pClient->getService(SERVICE_UUID);
+    relaysChar = pService->getCharacteristic(RELAYS_CHAR_UUID);
+    Serial.println("Relay client connected.");
+  } else {
+    Serial.println("Failed to connect.");
+  }
+}
+
+void loop() {
+  if (!pClient->isConnected()) return;
+
+  uint8_t bitmask = relaysChar->readValue()[0];
+
+  for (int i = 0; i < 8; i++) {
+    bool state = bitmask & (1 << i);
+    digitalWrite(relayPins[i], state);
+  }
+
+  Serial.printf("Relays bitmask: 0x%02X\n", bitmask);
+  delay(200);
+}
