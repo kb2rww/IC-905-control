@@ -1,0 +1,328 @@
+/*
+  IC-905 BLE Nextion Head Unit: Multi-Page, Persistent UI with BLE Integration
+  ----------------------------------------------------------------------------
+  - Page 0: Splash screen (no interactive controls)
+  - Page 1: btn1, btn2, btn3, slider1, t0 (slider value display)
+  - Page 2: btn2_1 ... btn2_10 (10 buttons)
+  - All button/slider/toggle states persist across power cycles (Preferences/NVS)
+  - BLE client: sends commands and receives status to update UI
+  - Uses EasyNextionLibrary for event-driven, reliable Nextion communication
+  ----------------------------------------------------------------------------
+  EXTENDED COMMENTS THROUGHOUT
+*/
+
+#include <Arduino.h>
+#include <Preferences.h>
+#include "EasyNextionLibrary.h"
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
+
+// ======= NEXTION AND UI CONFIGURATION =======
+#define TXD2 17   // ESP32 TX2 -> Nextion RX
+#define RXD2 16   // ESP32 RX2 <- Nextion TX (you had 16 in BLE code)
+#define NEXTION_BAUD 115200
+
+#define NUM_PAGE1_BTNS 3
+#define NUM_PAGE2_BTNS 10
+
+// Instantiate EasyNextionLibrary (Serial2)
+EasyNex myNex(Serial2);
+
+// State arrays for UI controls
+bool page1Btns[NUM_PAGE1_BTNS] = {false, false, false};
+int slider1Value = 0;
+bool page2Btns[NUM_PAGE2_BTNS] = {false};
+Preferences prefs; // For nonvolatile storage
+
+// ======= BLE CONFIGURATION =======
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
+#define STATUS_CHAR_UUID    "12345678-1234-5678-1234-56789abcdef1"
+#define COMMAND_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef2"
+
+static boolean doConnect = false;
+static BLEAdvertisedDevice* myDevice = nullptr;
+BLEClient* pClient = nullptr;
+BLERemoteCharacteristic* pCommandCharacteristic = nullptr;
+bool connected = false;
+
+// ======= FORWARD DECLARATIONS =======
+void saveStates();
+void loadStates();
+void syncPage1();
+void syncPage2();
+void logStates();
+void sendBLECommand(const String& mappedCmd);
+String mapUIToBLE(const String& eventName, int value = -1);
+void onBLENotification(const std::string &value);
+
+// ======= BLE HELPER CLASSES & CALLBACKS =======
+
+// BLE scan callback: looks for a server advertising correct service
+class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice advertisedDevice) {
+    if (advertisedDevice.haveServiceUUID() && advertisedDevice.getServiceUUID().toString() == SERVICE_UUID) {
+      myDevice = new BLEAdvertisedDevice(advertisedDevice);
+      doConnect = true;
+      BLEDevice::getScan()->stop();
+    }
+  }
+};
+
+// Connect to BLE server and get the command characteristic
+bool connectToServer() {
+  pClient = BLEDevice::createClient();
+  if (!pClient->connect(myDevice)) return false;
+  BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
+  if (!pRemoteService) return false;
+  pCommandCharacteristic = pRemoteService->getCharacteristic(COMMAND_CHAR_UUID);
+  if (!pCommandCharacteristic) return false;
+  connected = true;
+  // Register for status notifications if supported (optional, depends on server)
+  // pRemoteService->getCharacteristic(STATUS_CHAR_UUID)->registerForNotify(onBLENotification);
+  return true;
+}
+
+// ======= EASYNEXTIONLIBRARY UI EVENT HANDLERS =======
+
+// PAGE 1 BUTTONS
+void btn1Handler() {
+  page1Btns[0] = !page1Btns[0];
+  saveStates();
+  syncPage1();
+  logStates();
+  // Send mapped BLE command for btn1
+  sendBLECommand(mapUIToBLE("btn1", page1Btns[0]));
+}
+void btn2Handler() {
+  page1Btns[1] = !page1Btns[1];
+  saveStates();
+  syncPage1();
+  logStates();
+  sendBLECommand(mapUIToBLE("btn2", page1Btns[1]));
+}
+void btn3Handler() {
+  page1Btns[2] = !page1Btns[2];
+  saveStates();
+  syncPage1();
+  logStates();
+  sendBLECommand(mapUIToBLE("btn3", page1Btns[2]));
+}
+
+// SLIDER ON PAGE 1
+void slider1Handler() {
+  slider1Value = myNex.readNumber("slider1.val");
+  saveStates();
+  myNex.writeStr("t0.txt", String(slider1Value));
+  logStates();
+  sendBLECommand(mapUIToBLE("slider1", slider1Value));
+}
+
+// PAGE 2 BUTTONS
+void btn2BtnHandler() {
+  String comp = myNex.currentComponent; // e.g., "btn2_3"
+  int idx = comp.substring(5).toInt() - 1;
+  if (idx >= 0 && idx < NUM_PAGE2_BTNS) {
+    page2Btns[idx] = !page2Btns[idx];
+    saveStates();
+    syncPage2();
+    logStates();
+    sendBLECommand(mapUIToBLE(comp, page2Btns[idx]));
+  }
+}
+
+// (OPTIONAL) PAGE LOAD HANDLERS TO RESYNC UI ON PAGE SWITCH
+void page1Handler() { syncPage1(); }
+void page2Handler() { syncPage2(); }
+
+// ======= UI/STATE SYNC AND PERSISTENCE =======
+
+// Sync all controls on Page 1 with Nextion
+void syncPage1() {
+  for (int i = 0; i < NUM_PAGE1_BTNS; i++) {
+    String btnName = "btn" + String(i + 1);
+    myNex.writeNum(btnName + ".val", page1Btns[i] ? 1 : 0);
+  }
+  myNex.writeNum("slider1.val", slider1Value);
+  myNex.writeStr("t0.txt", String(slider1Value));
+}
+
+// Sync all controls on Page 2 with Nextion
+void syncPage2() {
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
+    String btnName = "btn2_" + String(i + 1);
+    myNex.writeNum(btnName + ".val", page2Btns[i] ? 1 : 0);
+  }
+}
+
+// Save current state to NVS/Preferences
+void saveStates() {
+  prefs.begin("ui", false);
+  for (int i = 0; i < NUM_PAGE1_BTNS; i++)
+    prefs.putBool(("p1b" + String(i)).c_str(), page1Btns[i]);
+  prefs.putInt("slider1", slider1Value);
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++)
+    prefs.putBool(("p2b" + String(i)).c_str(), page2Btns[i]);
+  prefs.end();
+}
+
+// Load state from NVS/Preferences
+void loadStates() {
+  prefs.begin("ui", true);
+  for (int i = 0; i < NUM_PAGE1_BTNS; i++)
+    page1Btns[i] = prefs.getBool(("p1b" + String(i)).c_str(), false);
+  slider1Value = prefs.getInt("slider1", 0);
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++)
+    page2Btns[i] = prefs.getBool(("p2b" + String(i)).c_str(), false);
+  prefs.end();
+  logStates();
+}
+
+// Print all UI states to Serial for debugging
+void logStates() {
+  Serial.print("Page1 Btns: ");
+  for (int i = 0; i < NUM_PAGE1_BTNS; i++)
+    Serial.printf("[%d]=%d ", i, page1Btns[i]);
+  Serial.printf("| slider1=%d", slider1Value);
+  Serial.print(" | Page2 Btns: ");
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++)
+    Serial.printf("[%d]=%d ", i, page2Btns[i]);
+  Serial.println();
+}
+
+// ======= MAP UI EVENT TO BLE COMMAND =======
+// You MUST adjust these mappings to match your BLE server's expectations!
+String mapUIToBLE(const String& eventName, int value) {
+  // Page 1 buttons
+  if (eventName == "btn1") return value ? "motor left on" : "motor left off";
+  if (eventName == "btn2") return value ? "motor right on" : "motor right off";
+  if (eventName == "btn3") return value ? "motor stop on" : "motor stop off";
+  if (eventName == "slider1") return "slider1=" + String(value);
+
+  // Page 2 buttons (btn2_1 ... btn2_10)
+  if (eventName.startsWith("btn2_")) {
+    // For example: btn2_4 toggles relay 4
+    int relayNum = eventName.substring(5).toInt();
+    if (relayNum > 0) {
+      return "relay " + String(relayNum) + (value ? " on" : " off");
+    }
+  }
+  return "";
+}
+
+// Send BLE command string
+void sendBLECommand(const String& mappedCmd) {
+  if (connected && pCommandCharacteristic && mappedCmd.length()) {
+    pCommandCharacteristic->writeValue(mappedCmd.c_str(), mappedCmd.length());
+    Serial.print("Sent BLE: "); Serial.println(mappedCmd);
+  } else {
+    Serial.print("BLE not connected, cmd skipped: "); Serial.println(mappedCmd);
+  }
+}
+
+// ======= BLE STATUS NOTIFICATION HANDLER =======
+// Update UI according to BLE status. Call this from BLE notification callback.
+void onBLENotification(const std::string &value) {
+  String msg = String(value.c_str());
+  Serial.print("[BLE] Status notified: ");
+  Serial.println(msg);
+
+  // EXAMPLE: Parse msg and update UI colors/states
+  // (You should adjust these to match your Nextion HMI and BLE server protocol)
+  if (msg.indexOf("motor left on") != -1)
+    myNex.writeNum("btn1.bco", 63488); // Red
+  else
+    myNex.writeNum("btn1.bco", 2016);  // Green
+
+  if (msg.indexOf("motor right on") != -1)
+    myNex.writeNum("btn2.bco", 63488);
+  else
+    myNex.writeNum("btn2.bco", 2016);
+
+  if (msg.indexOf("motor stop on") != -1)
+    myNex.writeNum("btn3.bco", 63488);
+  else
+    myNex.writeNum("btn3.bco", 2016);
+
+  // Example for relay buttons (Page 2)
+  for (int i = 1; i <= NUM_PAGE2_BTNS; i++) {
+    String test = "relay " + String(i) + " on";
+    String btnName = "btn2_" + String(i) + ".bco";
+    if (msg.indexOf(test) != -1)
+      myNex.writeNum(btnName, 63488);
+    else
+      myNex.writeNum(btnName, 2016);
+  }
+
+  // Update slider value and text if present in status
+  int idx = msg.indexOf("slider1=");
+  if (idx != -1) {
+    int val = msg.substring(idx + 8).toInt();
+    myNex.writeNum("slider1.val", val);
+    myNex.writeStr("t0.txt", String(val));
+    slider1Value = val;
+    saveStates();
+  }
+}
+
+// ======= SETUP AND MAIN LOOP =======
+void setup() {
+  Serial.begin(115200);
+  Serial2.begin(NEXTION_BAUD, SERIAL_8N1, RXD2, TXD2);
+  myNex.begin(NEXTION_BAUD);
+
+  BLEDevice::init("");
+  BLEScan* pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true);
+  pBLEScan->start(30, false);
+
+  loadStates();
+  // Don't syncPage1/Page2 yet; do it after splash and page load
+  Serial.println("=== Setup done, waiting for BLE and Nextion events ===");
+}
+
+void loop() {
+  myNex.NextionListen();
+
+  // BLE connect logic
+  if (doConnect && myDevice != nullptr) {
+    if (connectToServer()) {
+      Serial.println("BLE setup complete.");
+      // Register notification handler if supported:
+      // pRemoteService->getCharacteristic(STATUS_CHAR_UUID)->registerForNotify(onBLENotification);
+    }
+    doConnect = false;
+  }
+
+  // If BLE connection drops, restart scan
+  if (connected && !pClient->isConnected()) {
+    connected = false;
+    BLEDevice::getScan()->start(0);
+  }
+
+  // Add a small delay for stability
+  delay(10);
+}
+
+// ======= EASYNEXTIONLIBRARY EVENT REGISTRATION =======
+// Page 1 (main UI)
+EASYNEXTION_EVENT(btn1, btn1Handler);
+EASYNEXTION_EVENT(btn2, btn2Handler);
+EASYNEXTION_EVENT(btn3, btn3Handler);
+EASYNEXTION_EVENT(slider1, slider1Handler);
+// Page 2 (10 buttons)
+EASYNEXTION_EVENT(btn2_1, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_2, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_3, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_4, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_5, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_6, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_7, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_8, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_9, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_10, btn2BtnHandler);
+// Page events (sync controls when page loads)
+EASYNEXTION_EVENT(page1, page1Handler);
+EASYNEXTION_EVENT(page2, page2Handler);
