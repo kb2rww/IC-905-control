@@ -1,0 +1,191 @@
+/*
+  Full Example: ESP32 + Nextion UI with EasyNextionLibrary and Preferences
+  Layout:
+    - Page 1: btn1, btn2, btn3, slider1, t0
+    - Page 2: btn2_1 ... btn2_10
+  Features:
+    - Button and slider state saved/restored across power cycles
+    - Slider value is shown in text box
+    - All events handled via EasyNextionLibrary (uses "Send Component ID")
+*/
+
+#include <Arduino.h>
+#include <Preferences.h>
+#include "EasyNextionLibrary.h"
+
+// ======= USER CONFIGURABLE SECTION =======
+#define TXD2 17   // ESP32 TX2 -> Nextion RX
+#define RXD2 4    // ESP32 RX2 <- Nextion TX
+#define NEXTION_BAUD 9600
+
+#define NUM_PAGE1_BTNS 3
+#define NUM_PAGE2_BTNS 10
+
+// ======= GLOBALS =======
+Preferences prefs;                // For non-volatile storage
+EasyNex myNex(Serial2);           // EasyNextionLibrary object
+
+// State variables for all controls
+bool page1Btns[NUM_PAGE1_BTNS] = {false, false, false};
+int slider1Value = 0;
+bool page2Btns[NUM_PAGE2_BTNS] = {false};
+
+// ======= FUNCTION PROTOTYPES =======
+void saveStates();
+void loadStates();
+void syncPage1();
+void syncPage2();
+void logStates();
+
+// ======= SETUP =======
+void setup() {
+  Serial.begin(115200);
+  Serial2.begin(NEXTION_BAUD, SERIAL_8N1, RXD2, TXD2);
+  myNex.begin(NEXTION_BAUD);
+
+  Serial.println("=== System Boot ===");
+
+  loadStates();      // Restore last-known UI state
+  syncPage1();       // Sync all controls on Page 1
+  syncPage2();       // Sync all controls on Page 2
+
+  Serial.println("=== Setup Done ===");
+}
+
+// ======= MAIN LOOP =======
+void loop() {
+  myNex.NextionListen(); // Handle touch events from Nextion
+
+  // (Optional) Debug: pass PC serial to Nextion for direct testing
+  while (Serial.available()) {
+    Serial2.write(Serial.read());
+  }
+}
+
+// ======= EVENT HANDLERS (EasyNextionLibrary) =======
+// Page 1 Buttons (btn1, btn2, btn3)
+void btn1Handler() {
+  page1Btns[0] = !page1Btns[0];
+  Serial.printf("btn1 pressed, new state: %d\n", page1Btns[0]);
+  saveStates();
+  syncPage1();
+  logStates();
+}
+void btn2Handler() {
+  page1Btns[1] = !page1Btns[1];
+  Serial.printf("btn2 pressed, new state: %d\n", page1Btns[1]);
+  saveStates();
+  syncPage1();
+  logStates();
+}
+void btn3Handler() {
+  page1Btns[2] = !page1Btns[2];
+  Serial.printf("btn3 pressed, new state: %d\n", page1Btns[2]);
+  saveStates();
+  syncPage1();
+  logStates();
+}
+
+// Slider on Page 1 (slider1)
+void slider1Handler() {
+  slider1Value = myNex.readNumber("slider1.val");
+  Serial.printf("slider1 changed, new value: %d\n", slider1Value);
+  saveStates();
+  // Update text box to show slider value
+  myNex.writeStr("t0.txt", String(slider1Value));
+}
+
+// Page 2 Buttons (btn2_1 ... btn2_10)
+void btn2BtnHandler() {
+  // Get which button was pressed
+  String comp = myNex.currentComponent; // e.g., "btn2_3"
+  int idx = comp.substring(5).toInt() - 1; // "btn2_3" -> 2
+  if (idx >= 0 && idx < NUM_PAGE2_BTNS) {
+    page2Btns[idx] = !page2Btns[idx];
+    Serial.printf("%s pressed, new state: %d\n", comp.c_str(), page2Btns[idx]);
+    saveStates();
+    syncPage2();
+    logStates();
+  }
+}
+
+// (Optional) Page change events
+void page0Handler() { syncPage1(); }
+void page1Handler() { syncPage2(); }
+
+// ======= SYNC FUNCTIONS =======
+// Sync all controls on Page 1 with Nextion
+void syncPage1() {
+  // Buttons
+  for (int i = 0; i < NUM_PAGE1_BTNS; i++) {
+    String btnName = "btn" + String(i + 1);
+    myNex.writeNum(btnName + ".val", page1Btns[i] ? 1 : 0);
+  }
+  // Slider
+  myNex.writeNum("slider1.val", slider1Value);
+  // Text box shows slider value
+  myNex.writeStr("t0.txt", String(slider1Value));
+}
+
+// Sync all controls on Page 2 with Nextion
+void syncPage2() {
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++) {
+    String btnName = "btn2_" + String(i + 1);
+    myNex.writeNum(btnName + ".val", page2Btns[i] ? 1 : 0);
+  }
+}
+
+// ======= SAVE/LOAD STATE =======
+void saveStates() {
+  prefs.begin("ui", false);
+  for (int i = 0; i < NUM_PAGE1_BTNS; i++)
+    prefs.putBool(("p1b" + String(i)).c_str(), page1Btns[i]);
+  prefs.putInt("slider1", slider1Value);
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++)
+    prefs.putBool(("p2b" + String(i)).c_str(), page2Btns[i]);
+  prefs.end();
+}
+
+void loadStates() {
+  prefs.begin("ui", true);
+  for (int i = 0; i < NUM_PAGE1_BTNS; i++)
+    page1Btns[i] = prefs.getBool(("p1b" + String(i)).c_str(), false);
+  slider1Value = prefs.getInt("slider1", 0);
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++)
+    page2Btns[i] = prefs.getBool(("p2b" + String(i)).c_str(), false);
+  prefs.end();
+  logStates();
+}
+
+// ======= LOGGING =======
+void logStates() {
+  Serial.print("Page1 Btns: ");
+  for (int i = 0; i < NUM_PAGE1_BTNS; i++)
+    Serial.printf("[%d]=%d ", i, page1Btns[i]);
+  Serial.printf("| slider1=%d", slider1Value);
+  Serial.print(" | Page2 Btns: ");
+  for (int i = 0; i < NUM_PAGE2_BTNS; i++)
+    Serial.printf("[%d]=%d ", i, page2Btns[i]);
+  Serial.println();
+}
+
+// ======= EASYNEXTION EVENT REGISTRATION =======
+// Page 1
+EASYNEXTION_EVENT(btn1, btn1Handler);
+EASYNEXTION_EVENT(btn2, btn2Handler);
+EASYNEXTION_EVENT(btn3, btn3Handler);
+EASYNEXTION_EVENT(slider1, slider1Handler);
+// Page 2
+EASYNEXTION_EVENT(btn2_1, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_2, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_3, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_4, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_5, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_6, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_7, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_8, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_9, btn2BtnHandler);
+EASYNEXTION_EVENT(btn2_10, btn2BtnHandler);
+// Optionally, page events
+EASYNEXTION_EVENT(page0, page0Handler); // Page 1 in HMI Editor is page0
+EASYNEXTION_EVENT(page1, page1Handler); // Page 2 is page1
