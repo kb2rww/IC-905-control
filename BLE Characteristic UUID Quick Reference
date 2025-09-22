@@ -1,0 +1,59 @@
+# BLE Characteristic UUID Quick Reference
+
+This table maps UI controls to BLE characteristic UUIDs for the IC-905 BLE Nextion project.
+
+---
+
+## **Page 1 Controls**
+
+| Name      | Control           | UUID                                      |
+|-----------|-------------------|--------------------------------------------|
+| btn1      | Button 1          | `12345678-1234-5678-1234-56789abcdea1`    |
+| btn2      | Button 2          | `12345678-1234-5678-1234-56789abcdea2`    |
+| btn3      | Button 3          | `12345678-1234-5678-1234-56789abcdea3`    |
+| slider1   | Slider / Motor    | `12345678-1234-5678-1234-56789abcdea4`    |
+
+---
+
+## **Page 2 Controls (Relays/Buttons)**
+
+| Name      | Relay/Button      | UUID                                      |
+|-----------|-------------------|--------------------------------------------|
+| btn2_1    | Relay 1           | `12345678-1234-5678-1234-56789abcde01`    |
+| btn2_2    | Relay 2           | `12345678-1234-5678-1234-56789abcde02`    |
+| btn2_3    | Relay 3           | `12345678-1234-5678-1234-56789abcde03`    |
+| btn2_4    | Relay 4           | `12345678-1234-5678-1234-56789abcde04`    |
+| btn2_5    | Relay 5           | `12345678-1234-5678-1234-56789abcde05`    |
+| btn2_6    | Relay 6           | `12345678-1234-5678-1234-56789abcde06`    |
+| btn2_7    | Relay 7           | `12345678-1234-5678-1234-56789abcde07`    |
+| btn2_8    | Relay 8           | `12345678-1234-5678-1234-56789abcde08`    |
+| btn2_9    | Relay 9           | `12345678-1234-5678-1234-56789abcde09`    |
+| btn2_10   | Relay 10          | `12345678-1234-5678-1234-56789abcde10`    |
+
+---
+
+## **Additional BLE Characteristics**
+
+| Name         | Purpose             | UUID                                      |
+|--------------|---------------------|--------------------------------------------|
+| statusChar   | Status Notify       | `12345678-1234-5678-1234-56789abcdef1`    |
+| commandChar  | Command (Legacy)    | `12345678-1234-5678-1234-56789abcdef2`    |
+
+---
+
+## **Client Responsibilities**
+
+- **Client 1:** Controls relays 1–8 (`btn2_1` to `btn2_8`)
+- **Client 2:** Controls relay 9 or 10 (`btn2_9` or `btn2_10`) and the motor/slider (`slider1`)
+
+---
+
+## **UUID Construction Pattern**
+
+For relays/buttons on Page 2:  
+`12345678-1234-5678-1234-56789abcdeXX`  
+Where `XX` is a zero-padded number (e.g., 01, 02, ..., 10).
+
+For Page 1 controls, see the unique `abcdeaX` endings.
+
+---
