@@ -16,7 +16,7 @@
 // ======= USER CONFIGURABLE SECTION =======
 #define TXD2 17   // ESP32 TX2 -> Nextion RX
 #define RXD2 4    // ESP32 RX2 <- Nextion TX
-#define NEXTION_BAUD 9600
+#define NEXTION_BAUD 115200
 
 #define NUM_PAGE1_BTNS 3
 #define NUM_PAGE2_BTNS 10
