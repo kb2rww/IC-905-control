@@ -1,0 +1,46 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEClient.h>
+
+#define SERVER_NAME "ESP32-IC905"
+#define SERVICE_UUID "12345678-1234-5678-1234-56789abcdef0"
+#define RELAY1_CHAR_UUID "12345678-1234-5678-1234-56789abcde01"
+
+BLEClient*  pClient;
+BLERemoteCharacteristic* relayChar = nullptr;
+
+void setup() {
+  Serial.begin(115200);
+  BLEDevice::init("");
+
+  pClient = BLEDevice::createClient();
+
+  BLEScan* pScan = BLEDevice::getScan();
+  BLEScanResults foundDevices = pScan->start(5);
+  for (int i = 0; i < foundDevices.getCount(); i++) {
+    BLEAdvertisedDevice d = foundDevices.getDevice(i);
+    if (d.getName() == SERVER_NAME) {
+      pClient->connect(&d);
+      break;
+    }
+  }
+
+  if (pClient->isConnected()) {
+    BLERemoteService* pService = pClient->getService(SERVICE_UUID);
+    relayChar = pService->getCharacteristic(RELAY1_CHAR_UUID);
+    Serial.println("Connected to BLE server!");
+  } else {
+    Serial.println("Failed to connect to server");
+  }
+}
+
+void loop() {
+  static bool state = false;
+  state = !state;
+  if (relayChar) {
+    relayChar->writeValue((uint8_t*)&state, 1);
+    Serial.printf("Relay 1 set to %d\n", state);
+  }
+  delay(2000);
+}
