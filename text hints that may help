@@ -1,0 +1,158 @@
+//ESP32 uses LEDC for PWM. Here's how to set it up:
+#define IN1 25
+#define IN2 26
+#define PWM_CHANNEL1 0
+#define PWM_CHANNEL2 1
+#define PWM_FREQ 1000
+#define PWM_RESOLUTION 8 // 0–255
+
+void setupPWM() {
+  ledcSetup(PWM_CHANNEL1, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL2, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(IN1, PWM_CHANNEL1);
+  ledcAttachPin(IN2, PWM_CHANNEL2);
+}
+
+//Motor Control Function
+void setMotor(bool forward, uint8_t speed) {
+  if (forward) {
+    ledcWrite(PWM_CHANNEL1, speed); // IN1 = PWM
+    ledcWrite(PWM_CHANNEL2, 0);     // IN2 = LOW
+  } else {
+    ledcWrite(PWM_CHANNEL1, 0);     // IN1 = LOW
+    ledcWrite(PWM_CHANNEL2, speed); // IN2 = PWM
+  }
+}
+
+//In your loop(), after reading the forward/reverse button states and slider value, you can call:
+setMotor(forward, speed);
+
+
+////////////////////////////////////////////////////////////////////////
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEClient.h>
+
+// BLE server name and UUIDs
+#define SERVER_NAME "ESP32-IC905"
+#define SERVICE_UUID "12345678-1234-5678-1234-56789abcdef0"
+
+// BLE characteristic UUIDs
+#define RELAY_CHAR_UUID   "12345678-1234-5678-1234-56789abcde01"
+#define SPEED_CHAR_UUID   "12345678-1234-5678-1234-56789abcde02"
+#define FORWARD_CHAR_UUID "12345678-1234-5678-1234-56789abcde03"
+#define REVERSE_CHAR_UUID "12345678-1234-5678-1234-56789abcde04"
+
+// Motor control pins
+#define IN1 25
+#define IN2 26
+#define PWM_CHANNEL1 0
+#define PWM_CHANNEL2 1
+#define PWM_FREQ 1000
+#define PWM_RESOLUTION 8 // 0–255
+
+BLEClient* pClient;
+BLERemoteCharacteristic* relayChar = nullptr;
+BLERemoteCharacteristic* speedChar = nullptr;
+BLERemoteCharacteristic* forwardChar = nullptr;
+BLERemoteCharacteristic* reverseChar = nullptr;
+
+// Setup PWM channels for motor control
+void setupPWM() {
+  ledcSetup(PWM_CHANNEL1, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL2, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(IN1, PWM_CHANNEL1);
+  ledcAttachPin(IN2, PWM_CHANNEL2);
+}
+
+// Control motor direction and speed
+void setMotor(bool forward, uint8_t speed) {
+  if (forward) {
+    // Forward: IN1 = PWM, IN2 = LOW
+    ledcWrite(PWM_CHANNEL1, speed);
+    ledcWrite(PWM_CHANNEL2, 0);
+  } else {
+    // Reverse: IN1 = LOW, IN2 = PWM
+    ledcWrite(PWM_CHANNEL1, 0);
+    ledcWrite(PWM_CHANNEL2, speed);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  setupPWM();
+
+  // Initialize BLE
+  BLEDevice::init("");
+  pClient = BLEDevice::createClient();
+
+  // Scan for BLE server
+  BLEScan* pScan = BLEDevice::getScan();
+  BLEScanResults foundDevices = pScan->start(5);
+  for (int i = 0; i < foundDevices.getCount(); i++) {
+    BLEAdvertisedDevice d = foundDevices.getDevice(i);
+    if (d.getName() == SERVER_NAME) {
+      Serial.println("Found server, connecting...");
+      pClient->connect(&d);
+      break;
+    }
+  }
+
+  // Connect to service and characteristics
+  if (pClient->isConnected()) {
+    BLERemoteService* pService = pClient->getService(SERVICE_UUID);
+    if (pService == nullptr) {
+      Serial.println("Service not found!");
+      return;
+    }
+
+    relayChar   = pService->getCharacteristic(RELAY_CHAR_UUID);
+    speedChar   = pService->getCharacteristic(SPEED_CHAR_UUID);
+    forwardChar = pService->getCharacteristic(FORWARD_CHAR_UUID);
+    reverseChar = pService->getCharacteristic(REVERSE_CHAR_UUID);
+
+    if (relayChar && speedChar && forwardChar && reverseChar) {
+      Serial.println("Connected to all characteristics!");
+    } else {
+      Serial.println("One or more characteristics not found.");
+    }
+  } else {
+    Serial.println("Failed to connect to BLE server.");
+  }
+}
+
+void loop() {
+  if (!pClient->isConnected()) {
+    Serial.println("Disconnected from server.");
+    delay(2000);
+    return;
+  }
+
+  // Read relay button state
+  bool relayState = relayChar->readValue()[0];
+  digitalWrite(LED_BUILTIN, relayState); // Example: toggle onboard LED as relay
+
+  // Read speed from slider
+  uint8_t speed = speedChar->readValue()[0];
+
+  // Read direction buttons
+  bool forwardPressed = forwardChar->readValue()[0];
+  bool reversePressed = reverseChar->readValue()[0];
+
+  // Determine motor direction
+  if (forwardPressed && !reversePressed) {
+    setMotor(true, speed);
+    Serial.println("Motor: Forward");
+  } else if (!forwardPressed && reversePressed) {
+    setMotor(false, speed);
+    Serial.println("Motor: Reverse");
+  } else {
+    // Brake or stop
+    setMotor(true, 0);
+    Serial.println("Motor: Stopped");
+  }
+
+  Serial.printf("Relay: %d | Speed: %d\n", relayState, speed);
+  delay(500); // Adjust as needed
+}
