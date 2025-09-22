@@ -1,0 +1,14 @@
+// Assign relay numbers to GPIO pins
+const int relayPins[8] = {12, 13, 14, 15, 16, 17, 18, 19};
+
+void setup() {
+  for (int i = 0; i < 8; i++) {
+    pinMode(relayPins[i], OUTPUT);
+    digitalWrite(relayPins[i], LOW); // or HIGH, depending on relay logic
+  }
+}
+
+// Then, when a BLE write is received for relay n:
+void setRelay(int relayNum, bool state) {
+  digitalWrite(relayPins[relayNum], state ? HIGH : LOW);
+}
