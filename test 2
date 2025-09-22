@@ -187,5 +187,5 @@ EASYNEXTION_EVENT(btn2_8, btn2BtnHandler);
 EASYNEXTION_EVENT(btn2_9, btn2BtnHandler);
 EASYNEXTION_EVENT(btn2_10, btn2BtnHandler);
 // Optionally, page events
-EASYNEXTION_EVENT(page0, page0Handler); // Page 1 in HMI Editor is page0
-EASYNEXTION_EVENT(page1, page1Handler); // Page 2 is page1
+EASYNEXTION_EVENT(page1, page1Handler); // Page 1 in HMI Editor is page1
+EASYNEXTION_EVENT(page2, page2Handler); // Page 2 is page2
