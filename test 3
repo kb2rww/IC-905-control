@@ -1,0 +1,194 @@
+#include <Arduino.h>
+#include <EasyNextionLibrary.h>     // Simplifies communication with Nextion displays
+#include <BLEDevice.h>              // Core BLE functionality
+#include <BLEUtils.h>               // BLE utilities (UUIDs, descriptors, etc.)
+#include <BLEServer.h>              // BLE server setup
+#include <Preferences.h>            // Non-volatile storage (flash-backed key-value pairs)
+
+// 🟦 BLE UUIDs for custom service and characteristics
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
+#define SPEED_CHAR_UUID     "12345678-1234-5678-1234-56789abcde01"
+#define DIRECTION_CHAR_UUID "12345678-1234-5678-1234-56789abcde02"
+#define RELAY1_CHAR_UUID    "12345678-1234-5678-1234-56789abcde03"
+#define RELAYS_CHAR_UUID    "12345678-1234-5678-1234-56789abcde04"
+
+// 🟨 Serial2 pin mapping for Nextion display
+#define TXD2 17  // ESP32 TX to Nextion RX
+#define RXD2 4   // ESP32 RX from Nextion TX
+
+// 🟩 BLE characteristic pointers
+BLECharacteristic* speedChar;
+BLECharacteristic* directionChar;
+BLECharacteristic* relay1Char;
+BLECharacteristic* relaysChar;
+
+// 🟫 Preferences object for flash storage
+Preferences prefs;
+
+// 🟥 State variables
+uint8_t speedValue = 0;       // Slider value (0–255)
+bool direction = true;        // true = forward, false = reverse
+bool relay1 = false;          // Relay 1 toggle
+uint8_t relaysBitmask = 0;    // Bitmask for relays 2–8
+
+// 🟦 Nextion touch event buffer
+#define NEXTION_EVENT_LEN 7
+uint8_t nextionBuf[NEXTION_EVENT_LEN];
+uint8_t nextionIdx = 0;
+
+// 🟨 EasyNex object bound to Serial2
+EasyNex myNex(Serial2);
+
+// 🟩 Component ID for slider (update to match your HMI)
+#define SLIDER_COMPONENT_ID 7
+
+void setup() {
+  // 🟧 USB Serial for debugging
+  Serial.begin(115200);
+
+  // 🟦 Initialize Serial2 for Nextion communication
+  Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
+  myNex.begin(115200);  // Start EasyNex on Serial2
+
+  // 🟨 BLE server setup
+  BLEDevice::init("ESP32-IC905");  // Device name
+  BLEServer* pServer = BLEDevice::createServer();
+  BLEService* pService = pServer->createService(SERVICE_UUID);
+
+  // 🟩 Create BLE characteristics with read + notify
+  speedChar     = pService->createCharacteristic(SPEED_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  directionChar = pService->createCharacteristic(DIRECTION_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  relay1Char    = pService->createCharacteristic(RELAY1_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  relaysChar    = pService->createCharacteristic(RELAYS_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+
+  // 🟥 Start BLE service and advertising
+  pService->start();
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->start();
+
+  // 🟫 Load persisted state from flash
+  prefs.begin("nextion", true);  // Read-only mode
+  speedValue    = prefs.getUChar("speed", 0);
+  direction     = prefs.getBool("direction", true);
+  relay1        = prefs.getBool("relay1", false);
+  relaysBitmask = prefs.getUChar("relays", 0);
+  prefs.end();
+
+  // 🟧 Initial debug output
+  Serial.println("BLE server started. Waiting for Nextion input...");
+
+  // 🟩 Push initial state to BLE clients
+  speedChar->setValue(&speedValue, 1);
+  directionChar->setValue((uint8_t*)&direction, 1);
+  relay1Char->setValue((uint8_t*)&relay1, 1);
+  relaysChar->setValue(&relaysBitmask, 1);
+}
+
+void loop() {
+  // 🟨 Listen for EasyNex events (e.g., readNumber, string updates)
+  myNex.NextionListen();
+
+  // 🟥 Raw serial debug: show incoming bytes from Nextion
+  while (Serial2.available()) {
+    uint8_t b = Serial2.read();
+    Serial.printf("Serial2 byte: 0x%02X\n", b);
+
+    // 🟦 Buffer incoming bytes for touch event parsing
+    nextionBuf[nextionIdx++] = b;
+
+    // 🟫 Check for complete 7-byte touch event packet
+    if (nextionIdx == NEXTION_EVENT_LEN) {
+      if (nextionBuf[0] == 0x65 && nextionBuf[4] == 0xFF && nextionBuf[5] == 0xFF && nextionBuf[6] == 0xFF) {
+        uint8_t pageID    = nextionBuf[1];
+        uint8_t compID    = nextionBuf[2];
+        uint8_t eventType = nextionBuf[3];  // 0 = press, 1 = release
+
+        handleComponentEvent(compID, eventType, pageID);
+      }
+      nextionIdx = 0;  // Reset buffer
+    }
+
+    // 🟥 Prevent overflow if packet is malformed
+    if (nextionIdx >= NEXTION_EVENT_LEN) nextionIdx = 0;
+  }
+}
+
+// 🟦 Handle Nextion touch events by component ID
+void handleComponentEvent(uint8_t compID, uint8_t eventType, uint8_t pageID) {
+  if (eventType != 0) return;  // Only respond to PRESS events
+
+  // 🟨 Slider control (e.g., h0)
+  if (compID == SLIDER_COMPONENT_ID) {
+    uint32_t value = myNex.readNumber("h0");  // Read slider value
+    speedValue = constrain(value, 0, 255);    // Clamp to 0–255
+
+    prefs.begin("nextion", false);
+    prefs.putUChar("speed", speedValue);
+    prefs.end();
+
+    speedChar->setValue(&speedValue, 1);
+    speedChar->notify();
+
+    Serial.printf("Slider (compID=%u) value: %u\n", compID, speedValue);
+  }
+
+  // 🟩 Forward button
+  else if (compID == 1) {
+    direction = true;
+    prefs.begin("nextion", false);
+    prefs.putBool("direction", direction);
+    prefs.end();
+
+    directionChar->setValue((uint8_t*)&direction, 1);
+    directionChar->notify();
+
+    Serial.println("Direction: Forward");
+  }
+
+  // 🟥 Reverse button
+  else if (compID == 2) {
+    direction = false;
+    prefs.begin("nextion", false);
+    prefs.putBool("direction", direction);
+    prefs.end();
+
+    directionChar->setValue((uint8_t*)&direction, 1);
+    directionChar->notify();
+
+    Serial.println("Direction: Reverse");
+  }
+
+  // 🟫 Relay 1 toggle
+  else if (compID == 3) {
+    relay1 = !relay1;
+    prefs.begin("nextion", false);
+    prefs.putBool("relay1", relay1);
+    prefs.end();
+
+    relay1Char->setValue((uint8_t*)&relay1, 1);
+    relay1Char->notify();
+
+    Serial.printf("Relay 1 toggled: %s\n", relay1 ? "ON" : "OFF");
+  }
+
+  // 🟦 Relays 2–8 (component IDs 4–11)
+  else if (compID >= 4 && compID <= 11) {
+    uint8_t relayIndex = compID - 4;
+    relaysBitmask ^= (1 << relayIndex);  // Toggle bit
+
+    prefs.begin("nextion", false);
+    prefs.putUChar("relays", relaysBitmask);
+    prefs.end();
+
+    relaysChar->setValue(&relaysBitmask, 1);
+    relaysChar->notify();
+
+    Serial.printf("Relay %u toggled: %s\n", relayIndex + 2, (relaysBitmask & (1 << relayIndex)) ? "ON" : "OFF");
+  }
+
+  // 🟥 Unknown component
+  else {
+    Serial.printf("Unknown Component ID: %u\n", compID);
+  }
+}
