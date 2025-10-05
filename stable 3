@@ -1,0 +1,264 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <Preferences.h>
+
+// 🟦 BLE UUIDs for service and characteristics
+#define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
+#define SPEED_CHAR_UUID     "12345678-1234-5678-1234-56789abcde01"
+#define DIRECTION_CHAR_UUID "12345678-1234-5678-1234-56789abcde02"
+#define RELAY0_CHAR_UUID    "12345678-1234-5678-1234-56789abcde03"
+#define RELAYS_CHAR_UUID    "12345678-1234-5678-1234-56789abcde04"
+
+// 🟨 Serial2 pin mapping for Nextion display
+#define TXD2 17  // ESP32 TX → Nextion RX
+#define RXD2 4   // ESP32 RX ← Nextion TX
+
+// 🟩 BLE characteristic pointers
+BLECharacteristic* speedChar;
+BLECharacteristic* directionChar;
+BLECharacteristic* relay0Char;
+BLECharacteristic* relaysChar;
+
+// 🟫 Flash storage object
+Preferences prefs;
+
+// 🟥 System state variables
+uint8_t speedValue = 0;         // Speed setting (0–255)
+bool direction = true;          // Motor direction flag
+bool relay0 = false;            // Relay 0 state
+uint8_t relaysBitmask = 0;      // Bitmask for relays 2–8
+bool motorLeft = false;         // Left motor state
+bool motorRight = false;        // Right motor state
+bool powerControl = false;      // Power control flag
+
+// 🟨 Debug toggle and macro
+bool debugEnabled = true;
+#define DEBUG(msg) if (debugEnabled) Serial.println(msg)
+
+// 🟧 Command queue for decoupled parsing
+#define MAX_QUEUE 10
+String commandQueue[MAX_QUEUE];  // Circular buffer for commands
+uint8_t queueHead = 0;
+uint8_t queueTail = 0;
+
+// 🟪 Temporary buffer for incoming Nextion string
+String nextionCmd = "";         // Accumulates incoming characters
+bool nextionCmdReady = false;   // Not used in current logic
+
+// 🧩 Enqueue parsed command into circular buffer
+void enqueueCommand(const String& cmd) {
+  if ((queueTail + 1) % MAX_QUEUE != queueHead) {
+    commandQueue[queueTail] = cmd;
+    queueTail = (queueTail + 1) % MAX_QUEUE;
+  } else {
+    DEBUG("⚠️ Command queue full, dropping: " + cmd);
+  }
+}
+
+// 🧩 Dequeue next command from buffer
+String dequeueCommand() {
+  if (queueHead == queueTail) return "";
+  String cmd = commandQueue[queueHead];
+  queueHead = (queueHead + 1) % MAX_QUEUE;
+  return cmd;
+}
+
+// 🧩 List of known valid commands
+const char* validCommands[] = {
+  "PR", "P1", "P0",
+  "Ml1", "Ml0", "Mr1", "Mr0",
+  "P1L", "P2L",
+  "R11", "R10", "R21", "R20",
+  "R31", "R30", "R41", "R40",
+  "R51", "R50"
+};
+
+// 🧩 Check if command matches known relay pattern
+bool isRelayCommand(const String& cmd) {
+  return cmd.startsWith("RELAY_") && (cmd.endsWith("_ON") || cmd.endsWith("_OFF"));
+}
+
+// 🧩 Validate command against known list or relay pattern
+bool isValidCommand(const String& cmd) {
+  for (const char* known : validCommands) {
+    if (cmd == known) return true;
+  }
+  if (isRelayCommand(cmd)) return true;
+  return false;
+}
+
+// 🧩 Update relay state and notify BLE + persist to flash
+void updateRelayState(uint8_t relayNum, bool state) {
+  DEBUG("Updating relay " + String(relayNum) + " to " + (state ? "ON" : "OFF"));
+
+  if (relayNum == 0) {
+    relay0 = state;
+    prefs.begin("nextion", false);
+    prefs.putBool("relay0", relay0);
+    prefs.end();
+    relay0Char->setValue((uint8_t*)&relay0, 1);
+    relay0Char->notify();
+  } else if (relayNum >= 2 && relayNum <= 8) {
+    uint8_t bit = relayNum - 2;
+    if (state) relaysBitmask |= (1 << bit);
+    else       relaysBitmask &= ~(1 << bit);
+    prefs.begin("nextion", false);
+    prefs.putUChar("relays", relaysBitmask);
+    prefs.end();
+    relaysChar->setValue(&relaysBitmask, 1);
+    relaysChar->notify();
+  }
+}
+
+// 🧩 Handle parsed command string from Nextion
+void handleNextionString(const String& cmd) {
+  DEBUG("Handling command: " + cmd);
+
+  if (cmd == "PR") {
+    powerControl = false;
+    relay0 = false;
+    relaysBitmask = 0;
+    prefs.begin("nextion", false);
+    prefs.putBool("powerControl", powerControl);
+    prefs.putBool("relay0", relay0);
+    prefs.putUChar("relays", relaysBitmask);
+    prefs.end();
+    relay0Char->setValue((uint8_t*)&relay0, 1);
+    relay0Char->notify();
+    relaysChar->setValue(&relaysBitmask, 1);
+    relaysChar->notify();
+  } else if (cmd == "P1") {
+    powerControl = true;
+    relay0 = true;
+    prefs.begin("nextion", false);
+    prefs.putBool("powerControl", powerControl);
+    prefs.putBool("relay0", relay0);
+    prefs.end();
+    relay0Char->setValue((uint8_t*)&relay0, 1);
+    relay0Char->notify();
+    DEBUG("relay0 ON, powerControl enabled");
+  } else if (cmd == "P0") {
+  powerControl = false;
+  relay0 = false;
+  prefs.begin("nextion", false);
+  prefs.putBool("powerControl", powerControl);
+  prefs.putBool("relay0", relay0);
+  prefs.end();
+  relay0Char->setValue((uint8_t*)&relay0, 1);
+  relay0Char->notify();
+  DEBUG("relay0 OFF, powerControl disabled");
+}
+
+
+  else if (cmd == "Ml1") motorLeft = true;
+  else if (cmd == "Ml0") motorLeft = false;
+  else if (cmd == "Mr1") motorRight = true;
+  else if (cmd == "Mr0") motorRight = false;
+  else if (cmd == "R11") updateRelayState(1, true);
+  else if (cmd == "R10") updateRelayState(1, false);
+  else if (cmd == "R21") updateRelayState(2, true);
+  else if (cmd == "R20") updateRelayState(2, false);
+  else if (cmd == "R31") updateRelayState(3, true);
+  else if (cmd == "R30") updateRelayState(3, false);
+  else if (cmd == "R41") updateRelayState(4, true);
+  else if (cmd == "R40") updateRelayState(4, false);
+  else if (cmd == "R51") updateRelayState(5, true);
+  else if (cmd == "R50") updateRelayState(5, false);
+  else if (cmd == "P1L" || cmd == "P2L") {
+    //Serial2.println("b0144.val=" + String(relay0 ? 1 : 0));
+    //Serial2.println("b1440.val=" + String((relaysBitmask >> 0) & 1));
+    //Serial2.println("b21296.val=" + String((relaysBitmask >> 1) & 1));
+    //Serial2.println("b32304.val=" + String((relaysBitmask >> 2) & 1));
+    //Serial2.println("b45760.val=" + String((relaysBitmask >> 3) & 1));
+  }
+}
+
+// 🧩 Arduino setup function — runs once at boot
+void setup() {
+  Serial.begin(115200);  // USB serial for debug output
+  Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);  // Serial2 for Nextion
+
+  // BLE initialization
+  BLEDevice::init("ESP32-IC905");
+  BLEServer* pServer = BLEDevice::createServer();
+  BLEService* pService = pServer->createService(SERVICE_UUID);
+
+  // Create BLE characteristics
+  speedChar     = pService->createCharacteristic(SPEED_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  directionChar = pService->createCharacteristic(DIRECTION_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  relay0Char    = pService->createCharacteristic(RELAY0_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+    relaysChar    = pService->createCharacteristic(RELAYS_CHAR_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+
+  // Start BLE service and begin advertising
+  pService->start();
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);  // Include service UUID in advertisement
+  pAdvertising->start();                       // Begin BLE advertising
+
+  // Load persisted state from flash (Preferences)
+  prefs.begin("nextion", true);  // Open flash in read-only mode
+  speedValue    = prefs.getUChar("speed", 0);         // Default to 0 if not set
+  direction     = prefs.getBool("direction", true);   // Default to true
+  relay0        = prefs.getBool("relay0", false);     // Default to OFF
+  relaysBitmask = prefs.getUChar("relays", 0);        // Default to all OFF
+  motorLeft     = prefs.getBool("motorLeft", false);  // Default to OFF
+  motorRight    = prefs.getBool("motorRight", false); // Default to OFF
+  powerControl  = prefs.getBool("powerControl", false); // Default to OFF
+  prefs.end();  // Close flash access
+
+  // Push initial values to BLE characteristics
+  speedChar->setValue(&speedValue, 1);
+  directionChar->setValue((uint8_t*)&direction, 1);
+  relay0Char->setValue((uint8_t*)&relay0, 1);
+  relaysChar->setValue(&relaysBitmask, 1);
+
+  // Startup message
+  DEBUG("System initialized. Listening for Nextion commands...");
+}
+void loop() {
+  // 🔄 No-op placeholder for EasyNex — removed for manual serial parsing
+  // Previously: myNex.NextionListen();
+
+  // 📥 Parse incoming bytes from Nextion serial stream
+  while (Serial2.available()) {
+    char c = Serial2.read();         // Read one byte from Serial2
+    static uint8_t ffCount = 0;      // Tracks number of 0xFF terminators seen
+
+    // 🐛 Debug: show each character as it arrives
+    if (debugEnabled) {
+      if (c == 0xFF) {
+        Serial.print("[FF]");        // Print terminator marker
+        if (ffCount == 2) Serial.println();  // Insert newline after third [FF]
+      } else {
+        Serial.print(c);             // Print raw character
+      }
+    }
+
+    // 🧪 Detect end-of-command sequence (three 0xFF bytes)
+    if (c == 0xFF) {
+      ffCount++;
+      if (ffCount == 3) {
+        enqueueCommand(nextionCmd);  // Push full command to queue
+        nextionCmd = "";             // Clear buffer
+        ffCount = 0;                 // Reset terminator counter
+      }
+    } else {
+      nextionCmd += c;               // Accumulate character into buffer
+      ffCount = 0;                   // Reset if non-terminator
+    }
+  }
+
+  // 🧩 Process one command from queue (if available)
+  String cmdToProcess = dequeueCommand();
+  if (cmdToProcess != "") {
+    if (isValidCommand(cmdToProcess)) {
+      DEBUG("Parsed command: " + cmdToProcess);       // Confirm valid command
+      handleNextionString(cmdToProcess);              // Execute command logic
+    } else {
+      DEBUG("⚠️ Invalid command: " + cmdToProcess);   // Warn about unknown input
+      // Future: send error feedback to display
+    }
+  }
+}
