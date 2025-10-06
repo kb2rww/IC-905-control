@@ -8,3 +8,8 @@ Using Adafruit DRV8871 Motor Breakout (P3190) bord to control antenna rotor.
 add 0.96 Inch OLED I2C IIC Display Module 12864 128x32 Pixel SSD1306 to show SSID and IP as a test if using wifi.
 add 2.42 Inch OLED SPI display Modual 128x64 Pixel SSD1309 to show status of server via BLE in the BLEclient/server.
 add NEXTION NX4827P043 for display inside vehical and it comunicats to the BLE/Wifi server.
+
+
+stable 3 seams to work good with the display. still drop packets sumtimes.
+need to inplement kill outputs if BLE connection is lost to keep from having a desaster if running the motor.
+
