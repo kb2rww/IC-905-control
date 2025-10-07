@@ -1,0 +1,103 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEClient.h>
+#include <BLEAdvertisedDevice.h>
+
+#define PWM_PIN     16  // Motor PWM
+#define DIR_PIN     17  // Motor direction
+#define RELAY0_PIN  18  // Relay control
+
+// BLE UUIDs (must match server)
+BLEUUID serviceUUID("12345678-1234-5678-1234-56789abcdef0");
+BLEUUID speedCharUUID("12345678-1234-5678-1234-56789abcde01");
+BLEUUID directionCharUUID("12345678-1234-5678-1234-56789abcde02");
+BLEUUID relay0CharUUID("12345678-1234-5678-1234-56789abcde03");
+
+BLEClient* client;
+BLERemoteCharacteristic* speedChar;
+BLERemoteCharacteristic* directionChar;
+BLERemoteCharacteristic* relay0Char;
+bool connected = false;
+
+// 🟩 Speed notification callback
+void onSpeedNotify(BLERemoteCharacteristic* c, uint8_t* data, size_t len, bool isNotify) {
+  if (len < 1) return;
+  uint8_t speed = data[0]; // 0–255
+  analogWrite(PWM_PIN, speed);
+  Serial.printf("[BLE] Speed updated: %u\n", speed);
+}
+
+// 🟩 Direction notification callback
+void onDirectionNotify(BLERemoteCharacteristic* c, uint8_t* data, size_t len, bool isNotify) {
+  if (len < 1) return;
+  bool dir = data[0];
+  digitalWrite(DIR_PIN, dir ? HIGH : LOW);
+  Serial.printf("[BLE] Direction updated: %s\n", dir ? "Forward" : "Reverse");
+}
+
+// 🟩 Relay 0 notification callback
+void onRelay0Notify(BLERemoteCharacteristic* c, uint8_t* data, size_t len, bool isNotify) {
+  if (len < 1) return;
+  bool relayState = data[0];
+  digitalWrite(RELAY0_PIN, relayState ? HIGH : LOW);
+  Serial.printf("[BLE] Relay 0 updated: %s\n", relayState ? "ON" : "OFF");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // 🛠️ Pin setup
+  pinMode(DIR_PIN, OUTPUT);
+  pinMode(RELAY0_PIN, OUTPUT);
+  pinMode(PWM_PIN, OUTPUT);
+  analogWrite(PWM_PIN, 128);  // Initial 50% duty cycle
+
+  // 🔄 BLE init
+  BLEDevice::init("ESP32-Client");
+  client = BLEDevice::createClient();
+
+  BLEScan* scan = BLEDevice::getScan();
+  scan->setActiveScan(true);
+  BLEScanResults* results = scan->start(5);
+
+  for (int i = 0; i < results->getCount(); i++) {
+    BLEAdvertisedDevice device = results->getDevice(i);
+    if (device.haveServiceUUID() && device.isAdvertisingService(serviceUUID)) {
+      Serial.println("[BLE] Found server, connecting...");
+      if (client->connect(&device)) {
+        BLERemoteService* service = client->getService(serviceUUID);
+        if (!service) {
+          Serial.println("⚠️ Failed to find service");
+          return;
+        }
+
+        // 🔗 Get characteristics
+        speedChar     = service->getCharacteristic(speedCharUUID);
+        directionChar = service->getCharacteristic(directionCharUUID);
+        relay0Char    = service->getCharacteristic(relay0CharUUID);
+
+        // 🔔 Subscribe to notifications
+        if (speedChar && speedChar->canNotify())
+          speedChar->registerForNotify(onSpeedNotify);
+        if (directionChar && directionChar->canNotify())
+          directionChar->registerForNotify(onDirectionNotify);
+        if (relay0Char && relay0Char->canNotify())
+          relay0Char->registerForNotify(onRelay0Notify);
+
+        connected = true;
+        Serial.println("[BLE] Subscribed to all characteristics");
+        break;
+      } else {
+        Serial.println("⚠️ BLE connection failed");
+      }
+    }
+  }
+
+  if (!connected) Serial.println("⚠️ BLE server not found");
+}
+
+void loop() {
+  // BLE notifications drive updates
+}
